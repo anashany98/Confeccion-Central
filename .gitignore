@@ -1,0 +1,33 @@
+.env
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+backups/
+confeccion.db
+coverage.xml
+htmlcov/
+node_modules/
+tests/test_confeccion.db
+tmp/
+*.pyc
+__pycache__/
+*.zip
+*.bak
+
+# Debug / temp scripts from one-off fixes (e.g. encoding recovery).
+# Real E2E tests live in artifacts/test_*.cjs and stay tracked.
+artifacts/analyze_*.py
+artifacts/check_*.py
+artifacts/decode_*.py
+artifacts/debug_*.py
+artifacts/debug_*.cjs
+artifacts/dump_*.py
+artifacts/find_*.py
+artifacts/fix_*.py
+artifacts/final_*.py
+artifacts/final-*.png
+artifacts/snap_*.cjs
+artifacts/verify*.py
+artifacts/*.txt

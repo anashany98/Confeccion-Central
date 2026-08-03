@@ -1,0 +1,5 @@
+Las migraciones son la única forma admitida de crear o modificar el esquema.
+
+    alembic upgrade head
+    alembic current
+    alembic downgrade -1

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Confección Central">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b48a52"/>
+      <stop offset="1" stop-color="#7c5a2a"/>
+    </linearGradient>
+    <linearGradient id="hl" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="rgba(255,255,255,.18)"/>
+      <stop offset="1" stop-color="rgba(255,255,255,0)"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#bg)"/>
+  <rect width="64" height="64" rx="15" fill="url(#hl)"/>
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Aguja: diagonal de esquina inferior-izquierda a superior-derecha -->
+    <line x1="16" y1="48" x2="44" y2="20" stroke-width="4.5"/>
+    <!-- Ojo de la aguja (hueco en la parte superior) -->
+    <ellipse cx="46" cy="18" rx="3.2" ry="2" stroke-width="2.2" transform="rotate(-45 46 18)"/>
+    <!-- Hilo que sale del ojo, hace un lazo y baja -->
+    <path d="M 47 16 Q 56 8 56 22 Q 56 32 44 32 Q 34 32 30 42" stroke-width="2.4"/>
+  </g>
+</svg>

@@ -1,0 +1,15 @@
+{
+  "name": "Confección Central · Decoraciones Egea",
+  "short_name": "Confección",
+  "description": "Trabajos, habitaciones, historial y órdenes de corte centralizadas.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f2f2f7",
+  "theme_color": "#0a84ff",
+  "lang": "es-ES",
+  "icons": [
+    {"src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png"}
+  ]
+}

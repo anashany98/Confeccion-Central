@@ -1,0 +1,17 @@
+{
+  "name": "confeccion-central-frontend",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint app/static/central.js app/static/sw.js",
+    "format:check": "prettier --check app/static/central.js app/static/sw.js",
+    "format": "prettier --write app/static/central.js app/static/sw.js",
+    "test": "node --test tests/frontend/*.test.mjs"
+  },
+  "devDependencies": {
+    "eslint": "10.8.0",
+    "globals": "17.8.0",
+    "prettier": "3.9.6"
+  }
+}
