@@ -2,10 +2,33 @@ from __future__ import annotations
 
 import os
 import secrets
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _strip_env_alias(value: str, name: str) -> str:
+    """Acepta ``NAME=value`` o ``NAME = value`` pegados por error.
+
+    Algunos paneles de Coolify/Dokploy guardan literalmente lo pegado en
+    el campo de valor, incluyendo el prefijo del nombre de la variable.
+    Si el valor empieza por ``NAME=`` (con espacios opcionales), lo
+    recortamos y dejamos un aviso en stderr para que el operador corrija
+    el panel cuando pueda.
+    """
+    if not value:
+        return value
+    head, sep, rest = value.partition("=")
+    if sep and head.strip().upper() == name.upper():
+        print(
+            f"[config] AVISO: {name} lleva un prefijo '{name}=' en su valor; "
+            "lo recorto, pero conviene corregir el panel de Coolify.",
+            file=sys.stderr,
+        )
+        return rest.strip()
+    return value
 
 
 def _dev_session_secret() -> str:
@@ -70,6 +93,7 @@ class Settings:
 def load_settings() -> Settings:
     app_env = os.getenv("APP_ENV", "development").strip().lower()
     database_url = os.getenv("DATABASE_URL", "sqlite:///./confeccion.db").strip()
+    database_url = _strip_env_alias(database_url, "DATABASE_URL")
     session_secret = os.getenv("SESSION_SECRET", "").strip()
     production = app_env == "production"
     # En producción Coolify (y algunos proxies) sirve la URL con prefijo
