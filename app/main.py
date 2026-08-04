@@ -332,7 +332,14 @@ app.add_middleware(
     max_age=60 * 60 * settings.session_hours,
 )
 if settings.allowed_hosts and settings.allowed_hosts != ("*",):
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts))
+    # El HEALTHCHECK del Dockerfile y las sondas de Coolify consultan
+    # 127.0.0.1 desde dentro del propio contenedor; sin estos alias el
+    # TrustedHostMiddleware respondería 400 y el rolling update haría
+    # rollback de un servicio que en realidad está sano.
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=[*settings.allowed_hosts, "127.0.0.1", "localhost"],
+    )
 
 
 @app.middleware("http")
