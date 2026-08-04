@@ -350,10 +350,15 @@ async def security_middleware(
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # browser.sentry-cdn.com / *.sentry.io solo se usan si SENTRY_DSN está definido
+    # (index.html carga el SDK dinámicamente); sin DSN estas entradas son inertes.
     response.headers["Content-Security-Policy"] = (
-        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; connect-src 'self'; object-src 'none'; "
-        "base-uri 'self'; frame-ancestors 'none'"
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://browser.sentry-cdn.com; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self' https://*.sentry.io; "
+        "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     )
     if settings.cookie_https_only:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -559,7 +564,7 @@ def change_password(
         entity_id=user.id,
         summary=(
             f"{user.full_name or user.username} cambió su contraseña"
-            + (" (forzada por política)" if user.auth_version > 1 else "")
+            + (" (forzada por política)" if forced_change else "")
         ).strip(),
         user_id=user.id,
     )

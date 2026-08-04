@@ -1,8 +1,9 @@
-const CACHE = "confeccion-central-v2.0.2";
+const CACHE = "confeccion-central-v2.1.0";
 const STATIC = [
   "/",
   "/static/central.css",
   "/static/central.js",
+  "/static/logic.js",
   "/static/vendor/xlsx.full.min.js",
   "/static/manifest.webmanifest",
   "/static/icon-192.png",

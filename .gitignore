@@ -31,3 +31,18 @@ artifacts/final-*.png
 artifacts/snap_*.cjs
 artifacts/verify*.py
 artifacts/*.txt
+
+# Secretos locales de desarrollo (persistidos por app/config.py en dev para
+# sobrevivir a reinicios; los reemplaza la variable SESSION_SECRET en prod).
+.secrets/
+
+# Capturas de pantalla y logs de las pruebas GUI locales.
+gui-test-screenshots/
+
+# Caché de la herramienta CLI de ZCode (no parte del proyecto).
+.zcode/
+
+# Sidecars de SQLite (sólo en dev; en prod se usa Postgres por volúmenes).
+confeccion.db-journal
+confeccion.db-shm
+confeccion.db-wal

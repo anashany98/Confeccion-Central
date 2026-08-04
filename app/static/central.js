@@ -30,7 +30,8 @@
   // para abrir/cerrar modales y mostrar toasts sin acoplarse a detalles del DOM.
   const q = (selector, root = document) => root.querySelector(selector);
   const openModal = (id) => document.getElementById(id)?.classList.add("open");
-  const closeModal = (id) => document.getElementById(id)?.classList.remove("open");
+  const closeModal = (id) =>
+    document.getElementById(id)?.classList.remove("open");
   const toast = (text, bad = false) => {
     const wrap = document.getElementById("toasts");
     if (!wrap) return;
@@ -91,6 +92,13 @@
         number(row.height) > 0,
     );
   const dataRows = (state) => (state?.rows || []).filter(hasData);
+  const debounce = (fn, ms = 150) => {
+    let timer;
+    return (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), ms);
+    };
+  };
 
   const STATUS_LABELS = {
     sent: "Enviada",
@@ -178,6 +186,11 @@
         );
         error.status = response.status;
         error.payload = payload;
+        if (
+          response.status === 401 &&
+          !["/api/auth/login", "/api/auth/me"].includes(path)
+        )
+          sessionExpired();
         throw error;
       }
       return payload;
@@ -265,7 +278,6 @@
                     "revisar",
                     "produccion",
                     "etiquetas",
-                    "croquis",
                     "rieles",
                     "rielesdobles",
                     "checklist",
@@ -319,6 +331,7 @@
         central.csrf = result.csrf_token;
         overlay.remove();
         await bootstrapSession();
+        flushAllPendingSaves();
       } catch (error) {
         errorEl.textContent = error.message;
         errorEl.classList.add("show");
@@ -339,6 +352,22 @@
     app.clearSensitiveState?.();
     $("#centralSession")?.remove();
     loginOverlay();
+  }
+
+  // Sesión caducada en caliente (p. ej. tras un deploy/restart del servidor):
+  // mostramos el login sin perder los cambios pendientes y, al re-autenticar,
+  // reenviamos los guardados en cola.
+  let sessionExpiredNoticeAt = 0;
+  function sessionExpired() {
+    const now = Date.now();
+    if (now - sessionExpiredNoticeAt < 1500) return;
+    sessionExpiredNoticeAt = now;
+    central.csrf = null;
+    setSync("error", "Sesión caducada");
+    loginOverlay();
+  }
+  function flushAllPendingSaves() {
+    for (const jobId of [...central.pendingSaves.keys()]) flushJob(jobId);
   }
 
   function mapRemoteJobs(items) {
@@ -369,10 +398,9 @@
       "#view-relacion input[data-row]",
       "#view-relacion select[data-row]",
       "#addRowBtn",
-      "#add5Btn",
-      "#applyGlobalsBtn",
-      "#pasteExcelBtn",
-      "#importXlsxBtn",
+      "#addRowsBtn",
+      "#applyDefaultsBtn",
+      "#openImportModalBtn",
     ];
     $$(controls.join(",")).forEach((control) => {
       control.disabled = locked;
@@ -397,7 +425,6 @@
     setSync("saved", "Sincronizado");
     applyJobLock();
     renderCurrentJobCard();
-    renderSketches();
     await checkLocalDrafts(result.items);
   }
 
@@ -415,7 +442,9 @@
         if (!raw) continue;
         const draft = JSON.parse(raw);
         const serverJob = serverItems.find((j) => j.id === jobId);
-        const serverTime = serverJob ? new Date(serverJob.updated_at || 0).getTime() : 0;
+        const serverTime = serverJob
+          ? new Date(serverJob.updated_at || 0).getTime()
+          : 0;
         const draftTime = new Date(draft.updatedAt || 0).getTime();
         if (draftTime > serverTime) {
           candidates.push({ jobId, draft, serverJob });
@@ -427,9 +456,16 @@
     const current = app.getCurrentJob();
     const match = candidates.find((c) => c.jobId === current?.id);
     if (!match) return;
-    if (!confirm(
-      `Hay cambios sin guardar de tu última sesión en «${match.draft.name || "este trabajo"}» (${new Date(match.draft.updatedAt).toLocaleString("es-ES")}). ¿Restaurarlos?`,
-    )) return;
+    const restore = await app.askConfirm({
+      title: "Borrador local encontrado",
+      message: `Hay cambios sin guardar de tu última sesión en «${match.draft.name || "este trabajo"}» (${new Date(match.draft.updatedAt).toLocaleString("es-ES")}). ¿Restaurarlos?`,
+      confirmLabel: "Restaurar borrador",
+      cancelLabel: "Descartar",
+    });
+    if (!restore) {
+      clearLocalDraft(match.jobId);
+      return;
+    }
     try {
       central.hydrating = true;
       const restored = app.applyJobState({
@@ -547,6 +583,10 @@
               return;
             }
             central.pendingSaves.set(jobId, payload);
+            if (error.status === 401) {
+              sessionExpired();
+              return;
+            }
             setSync("error", "Error al guardar");
             app.toast(`No se pudo guardar: ${error.message}`, true);
             return;
@@ -681,103 +721,6 @@
     };
   }
 
-  function renderSketches() {
-    const grid = $("#centralSketchGrid");
-    if (!grid) return;
-    const state = app.getState();
-    const project = state.project || {};
-    const search = ($("#centralSketchSearch")?.value || "")
-      .trim()
-      .toLowerCase();
-    const rows = readyRows(state).filter(
-      (row) => !search || String(row.room).toLowerCase().includes(search),
-    );
-    const totalPanels = rows.reduce(
-      (sum, row) => sum + calculateRow(row, project).sheets,
-      0,
-    );
-    // Calcula una escala global (px por metro) que cabe en alto y ancho de la card.
-    // - tope vertical: 280 px
-    // - tope horizontal: 240 px (deja sitio para el riel y las cotas)
-    // - tope de detalle: 100 px/m (nunca se hace gigante)
-    const items = rows.map((row) => ({ row, calc: calculateRow(row, project) }));
-    const maxH = Math.max(...items.map((it) => it.calc.cutHeight), 0.5);
-    const maxW = Math.max(
-      ...items.map((it) => it.calc.cutWidth * Math.max(1, it.calc.sheets)),
-      0.5,
-    );
-    const scale = Math.min(280 / maxH, 240 / maxW, 100);
-
-    $("#centralSketchSummary").innerHTML = `
-      <div class="central-summary-pill"><span>Habitaciones</span><strong>${rows.length}</strong></div>
-      <div class="central-summary-pill"><span>Paños</span><strong>${totalPanels}</strong></div>
-      <div class="central-summary-pill"><span>Tela</span><strong>${escapeHtml(project.fabricName || project.fabricType || "Sin indicar")}</strong></div>
-      <div class="central-summary-pill"><span>Escala</span><strong>1 m = ${Math.round(scale)} px</strong></div>
-      <div class="central-summary-pill accent"><span>Obra</span><strong>${escapeHtml(project.hotel || "Sin nombre")}</strong></div>`;
-    grid.innerHTML = items.length
-      ? items.map(({ row, calc }) => sketchCard(row, project, calc, scale)).join("")
-      : '<div class="central-empty-panel">No hay habitaciones completas para generar croquis.</div>';
-  }
-
-  function sketchCard(row, project, calc, scale) {
-    const panelWidthPx = Math.max(8, Math.round(calc.cutWidth * scale));
-    const curtainWidthPx = Math.max(20, Math.round(panelWidthPx * calc.sheets));
-    const curtainHeightPx = Math.max(30, Math.round(calc.cutHeight * scale));
-    const hemM = number(row.hem ?? project.hem) || 0;
-    // El bajo/dobladillo ocupa el bajo real (m) → px, con tope visual
-    const hemPx = Math.max(2, Math.min(14, Math.round(hemM * scale)));
-    const bodyHeight = Math.max(20, curtainHeightPx - hemPx);
-    const stageHeight = curtainHeightPx + 56; // hueco para riel arriba y cotas abajo
-    const panels = Array.from(
-      { length: calc.sheets },
-      (_, index) => {
-        const label =
-          calc.sheets === 1
-            ? "HOJA ÚNICA"
-            : index === 0
-              ? "IZQ"
-              : index === 1
-                ? "DER"
-                : `HOJA ${index + 1}`;
-        return `<div class="central-panel" style="width:${panelWidthPx}px"><b>${label}</b></div>`;
-      },
-    ).join("");
-    // Color de tela según tipo, para que el croquis se lea de un vistazo.
-    const fabricPalette = {
-      oscurante: { body: "#3a3d44", hem: "#1f2127", label: "#f5f6f8" },
-      visillo: { body: "#fbf7ec", hem: "#c9b787", label: "#5b4a2c" },
-      panel: { body: "#e7e0cc", hem: "#a8987a", label: "#3d3424" },
-      loneta: { body: "#d8d2c0", hem: "#948465", label: "#322a1a" },
-    };
-    const palette =
-      fabricPalette[project.fabricType] || {
-        body: "#eef0f4",
-        hem: "#9aa3b3",
-        label: "#1c2638",
-      };
-    const status = row.status || "pending";
-    const hooks = escapeHtml(project.hooks || "");
-    return `<article class="central-sketch-card" data-status="${escapeHtml(status)}" data-row-id="${escapeHtml(row.id)}" style="cursor:pointer">
-      <div class="central-sketch-head"><div><h3>Habitación ${escapeHtml(row.room)}</h3><p>${escapeHtml(project.hotel || "")}</p></div><span class="central-sketch-status">${calc.sheets} hoja${calc.sheets === 1 ? "" : "s"}</span></div>
-      <div class="central-sketch-stage" style="height:${stageHeight}px">
-        <div class="central-curtain" data-hooks="${hooks}" data-fabric="${escapeHtml(project.fabricType || '')}" style="--fabric-body:${palette.body};--fabric-hem:${palette.hem};--fabric-label:${palette.label};width:${curtainWidthPx}px;height:${curtainHeightPx}px">
-          <div class="central-panels" style="height:${bodyHeight}px">${panels}</div>
-          <div class="central-curtain-hem" style="height:${hemPx}px" title="Bajo y cresta: ${formatNumber(hemM)} m"></div>
-          <div class="central-dim-width">Ancho hueco: ${formatNumber(calc.width)} m</div>
-          <div class="central-dim-height">Altura: ${formatNumber(calc.height)} m</div>
-        </div>
-        <div class="central-floor"></div>
-        <div class="central-scale-rule" style="width:${Math.round(scale)}px"><span>1 m</span></div>
-      </div>
-      <div class="central-sketch-meta">
-        <div><span>Corte por paño</span><b>${formatNumber(calc.cutWidth)} × ${formatNumber(calc.cutHeight)} m</b></div>
-        <div><span>Fruncido</span><b>${formatNumber(calc.gather)}</b></div>
-        <div><span>Bajo y cresta</span><b>${formatNumber(row.hem ?? project.hem)} m</b></div>
-        <div><span>Confección</span><b>${escapeHtml(project.confectionType || "Fruncido")}</b></div>
-      </div>${row.notes ? `<details class="central-sketch-notes"><summary>Observaciones</summary><p>${escapeHtml(row.notes)}</p></details>` : ""}
-    </article>`;
-  }
-
   function currentJobValidation() {
     const state = app.getState();
     const rows = dataRows(state);
@@ -802,6 +745,9 @@
   }
 
   async function loadOrders() {
+    const list = $("#centralOrdersList");
+    if (list && !central.orders.length)
+      list.innerHTML = '<div class="skeleton skeleton-row"></div>'.repeat(3);
     const result = await api("/api/orders");
     central.orders = result.items || [];
     renderOrders();
@@ -831,7 +777,9 @@
     );
     list.innerHTML = items.length
       ? items.map(orderCard).join("")
-      : '<div class="central-empty-panel">No hay órdenes que coincidan con el filtro.</div>';
+      : central.orders.length
+        ? '<div class="central-empty-panel">No hay órdenes que coincidan con el filtro.</div>'
+        : '<div class="central-empty-panel">Todavía no hay órdenes de corte. Apruebe el trabajo actual («Aprobar y crear orden») para generar la primera.</div>';
   }
 
   function orderCard(order, workshop = false) {
@@ -928,12 +876,12 @@
       );
       return;
     }
-    if (
-      !confirm(
-        `Se creará una orden con ${ready.length} habitaciones. ¿Continuar?`,
-      )
-    )
-      return;
+    const confirmed = await app.askConfirm({
+      title: "Aprobar y crear orden",
+      message: `Se creará una orden con ${ready.length} habitaciones y el trabajo quedará bloqueado para edición. ¿Continuar?`,
+      confirmLabel: "Crear orden",
+    });
+    if (!confirmed) return;
     try {
       await flushCurrentSave();
       const expectedVersion = central.versions.get(state.jobId);
@@ -979,7 +927,6 @@
             <button class="btn primary" data-central-modal-print="all">Imprimir todo</button>
             <button class="btn" data-central-modal-print="cuts">Tabla de cortes</button>
             <button class="btn" data-central-modal-print="confection">Confección</button>
-            <button class="btn" data-central-modal-print="sketches">Croquis</button>
           </div>`
               : ""
           }
@@ -1017,7 +964,14 @@
   }
 
   async function reopenJob(jobId) {
-    const reason = prompt("Motivo de la reapertura (obligatorio):")?.trim();
+    const reason = await app.askText({
+      title: "Reabrir trabajo",
+      message:
+        "La orden anterior conserva su snapshot. Indica el motivo de la reapertura.",
+      textarea: { label: "Motivo de la reapertura (obligatorio)" },
+      confirmLabel: "Reabrir",
+      required: true,
+    });
     if (!reason) return;
     try {
       await api(`/api/jobs/${encodeURIComponent(jobId)}/reopen`, {
@@ -1033,9 +987,15 @@
   }
 
   async function cancelOrder(orderId) {
-    const reason = prompt("Motivo de la cancelación (obligatorio):")?.trim();
+    const reason = await app.askText({
+      title: "Cancelar orden",
+      message: "La orden dejará de estar vigente. Indica el motivo.",
+      textarea: { label: "Motivo de la cancelación (obligatorio)" },
+      confirmLabel: "Cancelar orden",
+      danger: true,
+      required: true,
+    });
     if (!reason) return;
-    if (!confirm("La orden dejará de estar vigente. ¿Continuar?")) return;
     try {
       await api(`/api/orders/${encodeURIComponent(orderId)}/status`, {
         method: "PATCH",
@@ -1136,7 +1096,7 @@
     const groups = groupCuts(state);
     const include = (type) => documentType === "all" || documentType === type;
     const style = `<style>
-      @page{size:A4;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;font-size:10pt;margin:0}.head{display:flex;justify-content:space-between;border-bottom:3px solid #222;padding-bottom:7mm;margin-bottom:6mm}.head h1{font-size:19pt;margin:0}.head p{margin:2mm 0 0}.order{font-size:15pt;font-weight:800}.meta{display:grid;grid-template-columns:repeat(4,1fr);gap:2mm;margin-bottom:5mm}.meta div{border:1px solid #888;padding:2.5mm}.meta span{display:block;font-size:7pt;text-transform:uppercase}.meta b{display:block;margin-top:1mm}table{width:100%;border-collapse:collapse;margin-bottom:6mm}thead{display:table-header-group}tr{break-inside:avoid}th,td{border:1px solid #666;padding:2mm;text-align:left;font-size:8.5pt}th{background:#ddd}.page{break-after:page}.page:last-child{break-after:auto}.sketch{border:1px solid #666;padding:4mm;margin-bottom:5mm;break-inside:avoid}.curtain{height:75mm;border:2px solid #222;display:flex;position:relative;margin:8mm 15mm}.curtain:before{content:'RIEL';position:absolute;top:-6mm;left:-2mm;right:-2mm;height:4mm;background:#222;color:#fff;text-align:center;font-size:7pt}.panel{flex:1;border-right:1px dashed #555;display:flex;align-items:flex-end;justify-content:center;padding:3mm;background:repeating-linear-gradient(90deg,#fff 0 8mm,#f1f1f1 8mm 10mm)}.panel:last-child{border-right:0}.room-title{font-size:14pt;font-weight:800}.section-title{font-size:15pt;border-bottom:2px solid #222;padding-bottom:2mm;margin:0 0 5mm}.note{color:#555}.avoid{break-inside:avoid}</style>`;
+      @page{size:A4;margin:12mm}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;font-size:10pt;margin:0}.head{display:flex;justify-content:space-between;border-bottom:3px solid #222;padding-bottom:7mm;margin-bottom:6mm}.head h1{font-size:19pt;margin:0}.head p{margin:2mm 0 0}.order{font-size:15pt;font-weight:800}.meta{display:grid;grid-template-columns:repeat(4,1fr);gap:2mm;margin-bottom:5mm}.meta div{border:1px solid #888;padding:2.5mm}.meta span{display:block;font-size:7pt;text-transform:uppercase}.meta b{display:block;margin-top:1mm}table{width:100%;border-collapse:collapse;margin-bottom:6mm}thead{display:table-header-group}tr{break-inside:avoid}th,td{border:1px solid #666;padding:2mm;text-align:left;font-size:8.5pt}th{background:#ddd}.page{break-after:page}.page:last-child{break-after:auto}.section-title{font-size:15pt;border-bottom:2px solid #222;padding-bottom:2mm;margin:0 0 5mm}.note{color:#555}.avoid{break-inside:avoid}</style>`;
     const header = `<div class="head"><div><h1>ORDEN DE CORTE</h1><p><b>${escapeHtml(project.hotel || order.job_name)}</b> · ${escapeHtml(project.client || "")}</p></div><div style="text-align:right"><div class="order">${escapeHtml(order.order_number)}</div><p>Revisión ${order.revision}<br>${formatDateTime(order.created_at)}</p></div></div>`;
     const meta = `<div class="meta"><div><span>Tela</span><b>${escapeHtml(project.fabricName || project.fabricType || "Sin indicar")}</b></div><div><span>Ancho tela</span><b>${formatNumber(project.fabricWidth)} m</b></div><div><span>Habitaciones</span><b>${rows.length}</b></div><div><span>Paños</span><b>${rows.reduce((sum, row) => sum + calculateRow(row, project).sheets, 0)}</b></div></div>`;
     let content = "";
@@ -1146,8 +1106,6 @@
       content += `<section class="page">${header}${meta}<h2 class="section-title">Tabla de cortes</h2>${cutTablePrint(groups)}</section>`;
     if (include("confection"))
       content += `<section class="page">${header}<h2 class="section-title">Hojas de confección</h2>${roomsTablePrint(rows, project, true)}</section>`;
-    if (include("sketches"))
-      content += `<section>${header}<h2 class="section-title">Croquis por habitación</h2>${rows.map((row) => sketchPrint(row, project)).join("")}</section>`;
     return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${escapeHtml(order.order_number)}</title>${style}</head><body>${content}</body></html>`;
   }
 
@@ -1164,21 +1122,11 @@
       .join("")}</tbody></table>`;
   }
 
-  function sketchPrint(row, project) {
-    const calc = calculateRow(row, project);
-    const panels = Array.from(
-      { length: calc.sheets },
-      (_, index) =>
-        `<div class="panel"><b>${calc.sheets === 1 ? "HOJA ÚNICA" : index === 0 ? "IZQUIERDA" : "DERECHA"}</b></div>`,
-    ).join("");
-    return `<article class="sketch"><div class="room-title">Habitación ${escapeHtml(row.room)}</div><div class="curtain">${panels}</div><table><tr><th>Ancho hueco</th><td>${formatNumber(calc.width)} m</td><th>Altura</th><td>${formatNumber(calc.height)} m</td></tr><tr><th>Corte por paño</th><td>${formatNumber(calc.cutWidth)} × ${formatNumber(calc.cutHeight)} m</td><th>Fruncido / bajo</th><td>${formatNumber(calc.gather)} / ${formatNumber(row.hem ?? project.hem)} m</td></tr></table>${row.notes ? `<p class="note"><b>Observaciones:</b> ${escapeHtml(row.notes)}</p>` : ""}</article>`;
-  }
-
   async function loadHistory() {
     const el = $("#centralHistoryList");
     if (!el) return;
     const state = app.getState();
-    el.innerHTML = '<div class="empty">Cargando historial del servidor…</div>';
+    el.innerHTML = '<div class="skeleton skeleton-row"></div>'.repeat(4);
     try {
       await flushCurrentSave();
       const result = await api(
@@ -1238,141 +1186,233 @@
   }
 
   // === Matriz de permisos ===
-  async function openPermissionsMatrix(){
-    if(!can("permissions_manage")){toast("No tienes permisos para ver la matriz.",true);return}
+  async function openPermissionsMatrix() {
+    if (!can("permissions_manage")) {
+      toast("No tienes permisos para ver la matriz.", true);
+      return;
+    }
     openModal("permissionsMatrixModal");
-    const wrap=q("#matrixTableWrap");
-    if(wrap)wrap.innerHTML='<div class="matrix-loading">Cargando matriz…</div>';
-    try{
-      const result=await api("/api/users");
-      central.users=result.items||[];
+    const wrap = q("#matrixTableWrap");
+    if (wrap)
+      wrap.innerHTML = '<div class="matrix-loading">Cargando matriz…</div>';
+    try {
+      const result = await api("/api/users");
+      central.users = result.items || [];
       renderPermissionsMatrix();
-    }catch(e){toast("Error cargando usuarios: "+e.message,true)}
+    } catch (e) {
+      toast("Error cargando usuarios: " + e.message, true);
+    }
   }
-  function renderPermissionsMatrix(){
-    const wrap=q("#matrixTableWrap");
-    const search=(q("#matrixSearch")?.value||"").trim().toLowerCase();
-    const roleFilter=q("#matrixRoleFilter")?.value||"all";
-    if(!wrap)return;
-    const users=(central.users||[]).filter(u=>{
-      if(roleFilter!=="all"&&u.role!==roleFilter)return false;
-      if(!search)return true;
-      if((u.full_name||"").toLowerCase().includes(search))return true;
-      if((u.username||"").toLowerCase().includes(search))return true;
-      if(PERMISSIONS.some(([k,l])=>k.toLowerCase().includes(search)||l.toLowerCase().includes(search)))return true;
+  function renderPermissionsMatrix() {
+    const wrap = q("#matrixTableWrap");
+    const search = (q("#matrixSearch")?.value || "").trim().toLowerCase();
+    const roleFilter = q("#matrixRoleFilter")?.value || "all";
+    if (!wrap) return;
+    const users = (central.users || []).filter((u) => {
+      if (roleFilter !== "all" && u.role !== roleFilter) return false;
+      if (!search) return true;
+      if ((u.full_name || "").toLowerCase().includes(search)) return true;
+      if ((u.username || "").toLowerCase().includes(search)) return true;
+      if (
+        PERMISSIONS.some(
+          ([k, l]) =>
+            k.toLowerCase().includes(search) ||
+            l.toLowerCase().includes(search),
+        )
+      )
+        return true;
       return false;
     });
-    if(!users.length){wrap.innerHTML='<div class="empty" style="padding:30px;text-align:center;color:var(--muted)">Sin usuarios que coincidan con el filtro.</div>';q("#matrixStats").textContent="";return}
-    const perms=PERMISSIONS;
+    if (!users.length) {
+      wrap.innerHTML =
+        '<div class="empty" style="padding:30px;text-align:center;color:var(--muted)">Sin usuarios que coincidan con el filtro.</div>';
+      q("#matrixStats").textContent = "";
+      return;
+    }
+    const perms = PERMISSIONS;
     // Agrupa por módulo (tercer elemento del array)
-    const groups={};
-    perms.forEach(p=>{const g=p[2]||"Otros";(groups[g]=groups[g]||[]).push(p)});
-    let html='<table class="matrix-table"><thead><tr><th class="matrix-corner">Usuario</th>';
-    Object.entries(groups).forEach(([g,plist])=>{
-      html+=`<th colspan="${plist.length}" class="matrix-group-head">${esc(g)}</th>`;
+    const groups = {};
+    perms.forEach((p) => {
+      const g = p[2] || "Otros";
+      (groups[g] = groups[g] || []).push(p);
     });
-    html+='<th class="matrix-role-head">Rol</th></tr><tr><th class="matrix-corner"></th>';
-    Object.entries(groups).forEach(([g,plist])=>{
-      plist.forEach(([k,l])=>{html+=`<th class="matrix-perm-head" title="${esc(l)}">${esc(l)}</th>`});
+    let html =
+      '<table class="matrix-table"><thead><tr><th class="matrix-corner">Usuario</th>';
+    Object.entries(groups).forEach(([g, plist]) => {
+      html += `<th colspan="${plist.length}" class="matrix-group-head">${esc(g)}</th>`;
     });
-    html+='<th></th></tr></thead><tbody>';
-    users.forEach(u=>{
-      html+=`<tr data-user-id="${u.id}"><td class="matrix-user-cell"><b>${esc(u.full_name||u.username)}</b><small>${esc(u.username)}</small></td>`;
-      Object.values(groups).flat().forEach(([k])=>{
-        const has=(u.permissions||[]).includes(k);
-        const id=`m_${u.id}_${k.replace(/[^a-z0-9]/g,"_")}`;
-        html+=`<td class="matrix-cell"><label for="${id}" class="matrix-check" title="${esc(k)}"><input type="checkbox" id="${id}" data-matrix-toggle data-user-id="${u.id}" data-perm-key="${k}" ${has?"checked":""}><span></span></label></td>`;
+    html +=
+      '<th class="matrix-role-head">Rol</th></tr><tr><th class="matrix-corner"></th>';
+    Object.entries(groups).forEach(([g, plist]) => {
+      plist.forEach(([k, l]) => {
+        html += `<th class="matrix-perm-head" title="${esc(l)}">${esc(l)}</th>`;
       });
-      const roleLabel=u.role==="admin"?"Admin":u.role==="office"?"Oficina":"Corte";
-      html+=`<td><span class="matrix-role-badge ${u.role}">${roleLabel}</span></td></tr>`;
     });
-    html+='</tbody></table>';
-    wrap.innerHTML=html;
-    q("#matrixStats").textContent=`${users.length} usuario${users.length===1?"":"s"} · ${perms.length} permisos`;
+    html += "<th></th></tr></thead><tbody>";
+    users.forEach((u) => {
+      html += `<tr data-user-id="${u.id}"><td class="matrix-user-cell"><b>${esc(u.full_name || u.username)}</b><small>${esc(u.username)}</small></td>`;
+      Object.values(groups)
+        .flat()
+        .forEach(([k]) => {
+          const has = (u.permissions || []).includes(k);
+          const id = `m_${u.id}_${k.replace(/[^a-z0-9]/g, "_")}`;
+          html += `<td class="matrix-cell"><label for="${id}" class="matrix-check" title="${esc(k)}"><input type="checkbox" id="${id}" data-matrix-toggle data-user-id="${u.id}" data-perm-key="${k}" ${has ? "checked" : ""}><span></span></label></td>`;
+        });
+      const roleLabel =
+        u.role === "admin"
+          ? "Admin"
+          : u.role === "office"
+            ? "Oficina"
+            : "Corte";
+      html += `<td><span class="matrix-role-badge ${u.role}">${roleLabel}</span></td></tr>`;
+    });
+    html += "</tbody></table>";
+    wrap.innerHTML = html;
+    q("#matrixStats").textContent =
+      `${users.length} usuario${users.length === 1 ? "" : "s"} · ${perms.length} permisos`;
   }
-  async function togglePermission(userId,permKey,enabled){
-    const user=central.users.find(u=>u.id===userId);if(!user)return;
-    const before=[...(user.permissions||[])];
-    if(enabled){if(!user.permissions.includes(permKey))user.permissions.push(permKey)}
-    else{user.permissions=user.permissions.filter(p=>p!==permKey)}
-    try{
-      await api(`/api/users/${userId}`,{method:"PATCH",body:{permissions:user.permissions}});
-    }catch(e){
-      user.permissions=before;
+  async function togglePermission(userId, permKey, enabled) {
+    const user = central.users.find((u) => u.id === userId);
+    if (!user) return;
+    const before = [...(user.permissions || [])];
+    if (enabled) {
+      if (!user.permissions.includes(permKey)) user.permissions.push(permKey);
+    } else {
+      user.permissions = user.permissions.filter((p) => p !== permKey);
+    }
+    try {
+      await api(`/api/users/${userId}`, {
+        method: "PATCH",
+        body: { permissions: user.permissions },
+      });
+    } catch (e) {
+      user.permissions = before;
       throw e;
     }
   }
-  async function resetUserToRoleDefaults(userId){
-    const user=central.users.find(u=>u.id===userId);if(!user)return;
-    if(!confirm(`Restablecer los permisos por defecto del rol "${user.role}" para ${user.full_name||user.username}?\n\nSe perderán los permisos custom.`))return;
-    try{
-      await api(`/api/users/${userId}`,{method:"PATCH",body:{permissions:null}});
-      user.permissions=[...ROLE_DEFAULTS[user.role]||[]];
+  async function resetUserToRoleDefaults(userId) {
+    const user = central.users.find((u) => u.id === userId);
+    if (!user) return;
+    const ok = await app.askConfirm({
+      title: "Restablecer permisos",
+      message: `¿Restablecer los permisos por defecto del rol «${user.role}» para ${user.full_name || user.username}? Se perderán los permisos personalizados.`,
+      confirmLabel: "Restablecer",
+    });
+    if (!ok) return;
+    try {
+      await api(`/api/users/${userId}`, {
+        method: "PATCH",
+        body: { permissions: null },
+      });
+      user.permissions = [...(ROLE_DEFAULTS[user.role] || [])];
       renderPermissionsMatrix();
       toast("Permisos restablecidos");
-    }catch(e){toast("Error: "+e.message,true)}
+    } catch (e) {
+      toast("Error: " + e.message, true);
+    }
   }
-  async function resetAllToRoleDefaults(){
-    const users=(central.users||[]).filter(u=>{
-      const defaults=ROLE_DEFAULTS[u.role]||[];
-      const current=u.permissions||[];
-      if(defaults.length!==current.length)return true;
-      return !defaults.every(p=>current.includes(p));
+  async function resetAllToRoleDefaults() {
+    const users = (central.users || []).filter((u) => {
+      const defaults = ROLE_DEFAULTS[u.role] || [];
+      const current = u.permissions || [];
+      if (defaults.length !== current.length) return true;
+      return !defaults.every((p) => current.includes(p));
     });
-    if(!users.length){toast("Todos los usuarios ya tienen los permisos por defecto de su rol.");return}
-    let ok=0,fail=0;
-    for(const u of users){
-      try{
-        await api(`/api/users/${u.id}`,{method:"PATCH",body:{permissions:null}});
-        u.permissions=[...ROLE_DEFAULTS[u.role]||[]];
+    if (!users.length) {
+      toast("Todos los usuarios ya tienen los permisos por defecto de su rol.");
+      return;
+    }
+    let ok = 0,
+      fail = 0;
+    for (const u of users) {
+      try {
+        await api(`/api/users/${u.id}`, {
+          method: "PATCH",
+          body: { permissions: null },
+        });
+        u.permissions = [...(ROLE_DEFAULTS[u.role] || [])];
         ok++;
-      }catch(e){fail++}
+      } catch (e) {
+        fail++;
+      }
     }
     renderPermissionsMatrix();
     await loadUsers();
-    toast(`${ok} usuario${ok===1?"":"s"} restablecido${ok===1?"":"s"}${fail?` · ${fail} fallaron`:""}`, fail>0);
+    toast(
+      `${ok} usuario${ok === 1 ? "" : "s"} restablecido${ok === 1 ? "" : "s"}${fail ? ` · ${fail} fallaron` : ""}`,
+      fail > 0,
+    );
   }
-  function startImpersonating(userId){
-    const user=central.users.find(u=>u.id===userId);if(!user)return;
-    if(user.id===central.user?.id){toast("Ya estás viendo como tu propio usuario.",true);return}
-    if(impersonating){toast("Ya hay una sesión de impersonación activa. Sal primero.",true);return}
-    impersonating={
-      user:JSON.parse(JSON.stringify(user)),
-      originalUser:JSON.parse(JSON.stringify(central.user)),
-      startedAt:new Date().toISOString()
+  function startImpersonating(userId) {
+    const user = central.users.find((u) => u.id === userId);
+    if (!user) return;
+    if (user.id === central.user?.id) {
+      toast("Ya estás viendo como tu propio usuario.", true);
+      return;
+    }
+    if (impersonating) {
+      toast("Ya hay una sesión de impersonación activa. Sal primero.", true);
+      return;
+    }
+    impersonating = {
+      user: JSON.parse(JSON.stringify(user)),
+      originalUser: JSON.parse(JSON.stringify(central.user)),
+      startedAt: new Date().toISOString(),
     };
-    central.user=impersonating.user;
+    central.user = impersonating.user;
     applyRole(central.user);
     // renderAll vive en el IIFE de index.html y se expone via window.EgeaApp.
-    if (typeof window.EgeaApp?.renderAll === "function") window.EgeaApp.renderAll();
-    const b=q("#impersonateBanner");if(b){b.hidden=false;q("#impersonateBannerName").textContent=central.user.full_name||central.user.username;q("#impersonateBannerRole").textContent=central.user.role==="admin"?"Administrador":central.user.role==="office"?"Oficina":"Operario de corte"}
+    if (typeof window.EgeaApp?.renderAll === "function")
+      window.EgeaApp.renderAll();
+    const b = q("#impersonateBanner");
+    if (b) {
+      b.hidden = false;
+      q("#impersonateBannerName").textContent =
+        central.user.full_name || central.user.username;
+      q("#impersonateBannerRole").textContent =
+        central.user.role === "admin"
+          ? "Administrador"
+          : central.user.role === "office"
+            ? "Oficina"
+            : "Operario de corte";
+    }
     document.body.classList.add("has-impersonate-banner");
-    toast(`Viendo como: ${central.user.full_name||central.user.username}`);
+    toast(`Viendo como: ${central.user.full_name || central.user.username}`);
     // Cambia el título del documento para evitar confusiones
-    document.title=`[${central.user.username}] Confección Central`;
+    document.title = `[${central.user.username}] Confección Central`;
     // Registra en el audit log del backend. Si falla, no abortamos la
     // impersonación (es solo trazabilidad) pero avisamos al admin.
-    api("/api/audit/impersonate-start", { method: "POST", body: { target_id: userId } })
-      .catch((e) => toast("No se pudo registrar en el audit: " + e.message, true));
+    api("/api/audit/impersonate-start", {
+      method: "POST",
+      body: { target_id: userId },
+    }).catch((e) =>
+      toast("No se pudo registrar en el audit: " + e.message, true),
+    );
   }
-  function stopImpersonating(){
-    if(!impersonating)return;
+  function stopImpersonating() {
+    if (!impersonating) return;
     const stoppedTargetId = impersonating?.user?.id;
-    central.user=impersonating.originalUser;
+    central.user = impersonating.originalUser;
     applyRole(central.user);
-    if (typeof window.EgeaApp?.renderAll === "function") window.EgeaApp.renderAll();
-    impersonating=null;
-    const b=q("#impersonateBanner");if(b)b.hidden=true;
+    if (typeof window.EgeaApp?.renderAll === "function")
+      window.EgeaApp.renderAll();
+    impersonating = null;
+    const b = q("#impersonateBanner");
+    if (b) b.hidden = true;
     document.body.classList.remove("has-impersonate-banner");
-    document.title="Confección Central";
+    document.title = "Confección Central";
     toast("Volviendo a tu sesión de admin");
     if (stoppedTargetId) {
-      api("/api/audit/impersonate-stop", { method: "POST", body: { target_id: stoppedTargetId } })
-        .catch((e) => toast("No se pudo registrar en el audit: " + e.message, true));
+      api("/api/audit/impersonate-stop", {
+        method: "POST",
+        body: { target_id: stoppedTargetId },
+      }).catch((e) =>
+        toast("No se pudo registrar en el audit: " + e.message, true),
+      );
     }
   }
-  let impersonating=null;
-  let pendingImpersonateId=null;
+  let impersonating = null;
+  let pendingImpersonateId = null;
   async function loadUsers() {
     if (!can("users_manage")) return;
     try {
@@ -1498,7 +1538,6 @@
       const button = event.target.closest("button");
       if (!button) return;
       if (button.id === "historyBtn") setTimeout(loadHistory, 50);
-      if (button.dataset.view === "croquis") renderSketches();
       if (button.dataset.view === "ordenes") {
         await loadOrders();
         renderOrders();
@@ -1514,8 +1553,6 @@
         can("orders_view")
       )
         await loadOrders();
-      if (button.id === "centralPrintSketchesBtn" && can("orders_print"))
-        window.print();
       if (button.id === "centralRefreshUsersBtn" && can("users_manage"))
         await loadUsers();
       if (button.dataset.centralOrderView && can("orders_view"))
@@ -1538,7 +1575,7 @@
         openUserPermissions(button.dataset.centralUserEdit);
       if (button.dataset.centralUserImpersonate && can("users_manage")) {
         const uid = button.dataset.centralUserImpersonate;
-        const u = central.users.find(x => x.id === uid);
+        const u = central.users.find((x) => x.id === uid);
         if (!u) return;
         if (u.id === central.user?.id) {
           toast("No tiene sentido impersonar a tu propio usuario.", true);
@@ -1562,7 +1599,13 @@
       if (button.id === "stopImpersonateBtn") stopImpersonating();
       if (button.id === "openPermissionsMatrixBtn") openPermissionsMatrix();
       if (button.id === "matrixResetDefaults" && can("permissions_manage")) {
-        if (!confirm("¿Restablecer los permisos por defecto del rol para TODOS los usuarios con permisos custom? Esta acción afecta solo a los que tengan permisos distintos al default del rol.")) return;
+        const ok = await app.askConfirm({
+          title: "Restablecer todos",
+          message:
+            "¿Restablecer los permisos por defecto del rol para TODOS los usuarios con permisos personalizados?",
+          confirmLabel: "Restablecer todos",
+        });
+        if (!ok) return;
         resetAllToRoleDefaults();
       }
       if (button.dataset.centralUserActive && can("users_manage")) {
@@ -1601,31 +1644,11 @@
         }
       }
     });
+    const searchOrders = debounce(() => renderOrders(), 150);
+    const searchMatrix = debounce(() => renderPermissionsMatrix(), 150);
     document.addEventListener("input", (event) => {
-      if (event.target.id === "centralSketchSearch") renderSketches();
-      if (event.target.id === "centralOrderSearch") renderOrders();
-      if (event.target.id === "matrixSearch") renderPermissionsMatrix();
-    });
-    // Click en una card de croquis → salta a la fila en la tabla de relación.
-    document.addEventListener("click", (event) => {
-      const card = event.target.closest(".central-sketch-card[data-row-id]");
-      if (!card) return;
-      // Si el click fue en un control interactivo, no saltar.
-      if (event.target.closest("button, input, a, details, summary")) return;
-      const rowId = card.dataset.rowId;
-      if (!rowId || typeof app?.switchView !== "function") return;
-      app.switchView("relacion");
-      setTimeout(() => {
-        const tr = document.querySelector(
-          `#relationTable tr[data-id="${CSS.escape(rowId)}"]`,
-        );
-        if (!tr) return;
-        tr.scrollIntoView({ behavior: "smooth", block: "center" });
-        tr.classList.add("central-row-highlight");
-        const input = tr.querySelector('input[data-key="room"]');
-        if (input) setTimeout(() => input.focus(), 250);
-        setTimeout(() => tr.classList.remove("central-row-highlight"), 1800);
-      }, 80);
+      if (event.target.id === "centralOrderSearch") searchOrders();
+      if (event.target.id === "matrixSearch") searchMatrix();
     });
     $("#centralUserForm")?.addEventListener("submit", createUser);
 

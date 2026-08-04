@@ -28,6 +28,31 @@ La respuesta esperada del healthcheck es `{"status":"ok","database":"ok"}`. El c
 
 En producción deben mantenerse `APP_ENV=production`, `COOKIE_HTTPS_ONLY=true`, `DOCS_ENABLED=false`, un `SESSION_SECRET` aleatorio de al menos 32 caracteres y PostgreSQL. La aplicación rechaza una configuración de producción insegura.
 
+### Despliegue en Coolify
+
+Coolify crea los recursos a partir del repositorio de GitHub, así que basta con:
+
+1. **Crear un nuevo recurso** en Coolify apuntando a la rama por defecto (`main`) del repositorio.
+   - Build pack: `Dockerfile`. El `Dockerfile` ya está en la raíz del proyecto.
+   - Puerto interno: `8000` (el `HEALTHCHECK` del Dockerfile lo valida).
+2. **Servicio de base de datos**: añada un servicio PostgreSQL gestionado por Coolify. Coolify expone internamente las variables `DATABASE_URL_HOST`, `DATABASE_URL_PASSWORD`, `DATABASE_URL_USER`, `DATABASE_URL_DATABASE`. Proyecte los nombres esperados por la app en la pestaña de variables:
+   - `DATABASE_URL` = `postgresql+psycopg://${DATABASE_URL_USER}:${DATABASE_URL_PASSWORD}@${DATABASE_URL_HOST}:5432/${DATABASE_URL_DATABASE}`
+3. **Variables de entorno**: copie la lista de `.env.example` y defina cada valor en Coolify. Campos **obligatorios** en producción:
+   - `APP_ENV=production`
+   - `SESSION_SECRET` (≥ 32 caracteres aleatorios, persistente — cambiarlo fuerza re-login a todos los usuarios).
+   - `COOKIE_HTTPS_ONLY=true`
+   - `ALLOWED_HOSTS` con el dominio público del recurso.
+   - `FORWARDED_ALLOW_IPS` con la IP (o red) del proxy terminado; por defecto Coolify suele usar `*`.
+4. **Crear el administrador inicial**: abra un terminal del recurso y ejecute
+   `python -m app.cli create-admin` (con `ADMIN_USERNAME`, `ADMIN_FULL_NAME` y `ADMIN_PASSWORD` como variables temporales durante el comando) o cree un recurso de un solo uso con el perfil `tools`:
+   ```bash
+   docker compose --profile tools run --rm admin-init
+   ```
+5. **HTTPS y proxy**: Coolify configura el proxy inverso automáticamente; `SESSION_COOKIE_SECURE=true` requiere `COOKIE_HTTPS_ONLY=true`. La app escucha en `0.0.0.0:8000` por dentro del contenedor.
+6. **Verificación**: abra el dominio, haga login con el admin, cree un trabajo de prueba, apruebe una orden y compruebe el puesto de corte. Revise los logs del recurso si el chip de sincronización muestra `Sesión caducada` tras cada deploy (debería ser estable).
+
+Tras cada `git push`, Coolify reconstruye la imagen y reinicia el contenedor. El `SESSION_SECRET` permanece estable (lo gestiona Coolify como variable persistente) y los trabajos abiertos se conservan; los cambios en memoria que estuvieran a media escritura y los borradores offline se restauran al re-entrar.
+
 ## Flujo funcional
 
 ```text

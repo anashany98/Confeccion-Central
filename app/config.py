@@ -3,6 +3,36 @@ from __future__ import annotations
 import os
 import secrets
 from dataclasses import dataclass
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def _dev_session_secret() -> str:
+    """Secreto estable para desarrollo.
+
+    Sin SESSION_SECRET, cada proceso generaba uno aleatorio y todos los
+    reinicios (o deploys) invalidaban las sesiones: los guardados pendientes
+    acababan en 401 y el usuario veía "Error al guardar" al arrancar.
+    En dev persistimos el secreto en .secrets/ para sobrevivir reinicios.
+    En producción SESSION_SECRET sigue siendo obligatorio por entorno.
+    """
+    secret_file = BASE_DIR / ".secrets" / "dev_session_secret"
+    try:
+        if secret_file.exists():
+            value = secret_file.read_text().strip()
+            if len(value) >= 32:
+                return value
+        secret_file.parent.mkdir(parents=True, exist_ok=True)
+        value = secrets.token_urlsafe(48)
+        secret_file.write_text(value)
+        try:
+            os.chmod(secret_file, 0o600)
+        except OSError:
+            pass  # Windows: permisos POSIX no aplicables
+        return value
+    except OSError:
+        return secrets.token_urlsafe(48)
 
 
 def _bool_env(name: str, default: bool) -> bool:
@@ -55,7 +85,7 @@ def load_settings() -> Settings:
     if production and not cookie_https_only:
         errors.append("COOKIE_HTTPS_ONLY debe ser true en producción")
     if not session_secret:
-        session_secret = secrets.token_urlsafe(48)
+        session_secret = _dev_session_secret()
     if errors:
         raise RuntimeError("; ".join(errors))
 
