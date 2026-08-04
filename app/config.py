@@ -72,11 +72,22 @@ def load_settings() -> Settings:
     database_url = os.getenv("DATABASE_URL", "sqlite:///./confeccion.db").strip()
     session_secret = os.getenv("SESSION_SECRET", "").strip()
     production = app_env == "production"
+    # En producción Coolify (y algunos proxies) sirve la URL con prefijo
+    # `postgres://` (sin la `ql`); SQLAlchemy 2.x no la reconoce. Aceptamos los
+    # tres esquemas habituales y normalizamos al driver psycopg antes de
+    # crear el motor, para que el operador pueda pegar la URL tal cual.
+    if production and not database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://", "postgres://")
+    ):
+        # fallthrough: error se acumula abajo
+        pass
     allowed_hosts = _csv_env("ALLOWED_HOSTS", "*" if not production else "")
     cookie_https_only = _bool_env("COOKIE_HTTPS_ONLY", production)
 
     errors: list[str] = []
-    if production and not database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+    if production and not database_url.startswith(
+        ("postgresql://", "postgresql+psycopg://", "postgres://")
+    ):
         errors.append("DATABASE_URL debe apuntar a PostgreSQL en producción")
     if production and len(session_secret) < 32:
         errors.append("SESSION_SECRET debe tener al menos 32 caracteres en producción")
@@ -88,6 +99,14 @@ def load_settings() -> Settings:
         session_secret = _dev_session_secret()
     if errors:
         raise RuntimeError("; ".join(errors))
+
+    # SQLAlchemy 2.x sólo entiende `postgresql://` y `postgresql+psycopg://`.
+    # Si el operador pegó `postgres://` (alias de libpq) o `postgresql://`
+    # sin driver, lo normalizamos al driver psycopg.
+    if database_url.startswith("postgres://"):
+        database_url = "postgresql+psycopg://" + database_url[len("postgres://"):]
+    elif database_url.startswith("postgresql://"):
+        database_url = "postgresql+psycopg" + database_url[len("postgresql"):]
 
     return Settings(
         app_env=app_env,
