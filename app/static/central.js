@@ -1117,16 +1117,18 @@
   }
 
   function roomsTablePrint(rows, project, confection = false) {
-    // Las hojas de confección muestran las medidas del paño terminado;
-    // la orden de corte mantiene el corte por paño.
-    const measureHeader = confection ? "Medidas paño" : "Corte por paño";
-    return `<table><thead><tr><th>Hab.</th><th>Ancho hueco</th><th>Altura</th><th>Hojas</th><th>${measureHeader}</th><th>Fruncido</th>${confection ? "<th>Bajo</th>" : ""}<th>Observaciones</th></tr></thead><tbody>${rows
+    // Las hojas de confección muestran ancho y alto del paño terminado en
+    // columnas separadas; la orden de corte mantiene el corte por paño.
+    const measureHeaders = confection
+      ? "<th>Ancho</th><th>Alto</th>"
+      : "<th>Corte por paño</th>";
+    return `<table><thead><tr><th>Hab.</th><th>Ancho hueco</th><th>Altura</th><th>Hojas</th>${measureHeaders}<th>Fruncido</th>${confection ? "<th>Bajo</th>" : ""}<th>Observaciones</th></tr></thead><tbody>${rows
       .map((row) => {
         const c = calculateRow(row, project);
         const measure = confection
-          ? `${formatNumber(c.panelWidth)} × ${formatNumber(c.finalHeight)} m`
-          : `${formatNumber(c.cutWidth)} × ${formatNumber(c.cutHeight)} m`;
-        return `<tr><td><b>${escapeHtml(row.room)}</b></td><td>${formatNumber(c.width)} m</td><td>${formatNumber(c.height)} m</td><td>${c.sheets}</td><td>${measure}</td><td>${formatNumber(c.gather)}</td>${confection ? `<td>${formatNumber(row.hem ?? project.hem)} m</td>` : ""}<td>${escapeHtml(row.notes || "")}</td></tr>`;
+          ? `<td>${formatNumber(c.panelWidth)}</td><td>${formatNumber(c.finalHeight)}</td>`
+          : `<td>${formatNumber(c.cutWidth)} × ${formatNumber(c.cutHeight)} m</td>`;
+        return `<tr><td><b>${escapeHtml(row.room)}</b></td><td>${formatNumber(c.width)} m</td><td>${formatNumber(c.height)} m</td><td>${c.sheets}</td>${measure}<td>${formatNumber(c.gather)}</td>${confection ? `<td>${formatNumber(row.hem ?? project.hem)} m</td>` : ""}<td>${escapeHtml(row.notes || "")}</td></tr>`;
       })
       .join("")}</tbody></table>`;
   }
