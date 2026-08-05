@@ -707,8 +707,6 @@
     const standardWidth = Math.round(width / 0.05) * 0.05;
     const cutWidth = (standardWidth / sheets) * gather;
     const cutHeight = Math.round(finalHeight / 0.03) * 0.03;
-    // Mismo añadido de cierre fijo que en logic.js.
-    const panelWidth = width / sheets + 0.06;
     const meters = width * gather;
     return {
       width,
@@ -718,7 +716,6 @@
       finalHeight,
       cutWidth,
       cutHeight,
-      panelWidth,
       meters,
       metersPerSheet: sheets ? meters / sheets : meters,
     };
@@ -1117,18 +1114,21 @@
   }
 
   function roomsTablePrint(rows, project, confection = false) {
-    // Las hojas de confección muestran ancho y alto del paño terminado en
-    // columnas separadas; la orden de corte mantiene el corte por paño.
-    const measureHeaders = confection
-      ? "<th>Ancho</th><th>Alto</th>"
-      : "<th>Corte por paño</th>";
-    return `<table><thead><tr><th>Hab.</th><th>Ancho hueco</th><th>Altura</th><th>Hojas</th>${measureHeaders}<th>Fruncido</th>${confection ? "<th>Bajo</th>" : ""}<th>Observaciones</th></tr></thead><tbody>${rows
+    // Las hojas de confección muestran un ancho de corte por paño/hoja
+    // (2 columnas si hay 2 hojas, 1 si es hoja única) con la altura al lado;
+    // la orden de corte mantiene su disposición original.
+    const header = confection
+      ? "<tr><th>Hab.</th><th>Ancho hueco</th><th>Hojas</th><th>Ancho 1</th><th>Ancho 2</th><th>Altura</th><th>Fruncido</th><th>Bajo</th><th>Observaciones</th></tr>"
+      : "<tr><th>Hab.</th><th>Ancho hueco</th><th>Altura</th><th>Hojas</th><th>Corte por paño</th><th>Fruncido</th><th>Observaciones</th></tr>";
+    return `<table><thead>${header}</thead><tbody>${rows
       .map((row) => {
         const c = calculateRow(row, project);
-        const measure = confection
-          ? `<td>${formatNumber(c.panelWidth)}</td><td>${formatNumber(c.finalHeight)}</td>`
-          : `<td>${formatNumber(c.cutWidth)} × ${formatNumber(c.cutHeight)} m</td>`;
-        return `<tr><td><b>${escapeHtml(row.room)}</b></td><td>${formatNumber(c.width)} m</td><td>${formatNumber(c.height)} m</td><td>${c.sheets}</td>${measure}<td>${formatNumber(c.gather)}</td>${confection ? `<td>${formatNumber(row.hem ?? project.hem)} m</td>` : ""}<td>${escapeHtml(row.notes || "")}</td></tr>`;
+        if (confection) {
+          const width2 =
+            c.sheets > 1 ? `<td>${formatNumber(c.cutWidth)}</td>` : "<td></td>";
+          return `<tr><td><b>${escapeHtml(row.room)}</b></td><td>${formatNumber(c.width)} m</td><td>${c.sheets}</td><td>${formatNumber(c.cutWidth)}</td>${width2}<td>${formatNumber(c.height)} m</td><td>${formatNumber(c.gather)}</td><td>${formatNumber(row.hem ?? project.hem)} m</td><td>${escapeHtml(row.notes || "")}</td></tr>`;
+        }
+        return `<tr><td><b>${escapeHtml(row.room)}</b></td><td>${formatNumber(c.width)} m</td><td>${formatNumber(c.height)} m</td><td>${c.sheets}</td><td>${formatNumber(c.cutWidth)} × ${formatNumber(c.cutHeight)} m</td><td>${formatNumber(c.gather)}</td><td>${escapeHtml(row.notes || "")}</td></tr>`;
       })
       .join("")}</tbody></table>`;
   }
