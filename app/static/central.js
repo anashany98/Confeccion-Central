@@ -707,6 +707,8 @@
     const standardWidth = Math.round(width / 0.05) * 0.05;
     const cutWidth = (standardWidth / sheets) * gather;
     const cutHeight = Math.round(finalHeight / 0.03) * 0.03;
+    // Mismo añadido de cierre fijo que en logic.js.
+    const panelWidth = width / sheets + 0.06;
     const meters = width * gather;
     return {
       width,
@@ -716,6 +718,7 @@
       finalHeight,
       cutWidth,
       cutHeight,
+      panelWidth,
       meters,
       metersPerSheet: sheets ? meters / sheets : meters,
     };
@@ -1114,10 +1117,16 @@
   }
 
   function roomsTablePrint(rows, project, confection = false) {
-    return `<table><thead><tr><th>Hab.</th><th>Ancho hueco</th><th>Altura</th><th>Hojas</th><th>Corte por paño</th><th>Fruncido</th>${confection ? "<th>Bajo</th>" : ""}<th>Observaciones</th></tr></thead><tbody>${rows
+    // Las hojas de confección muestran las medidas del paño terminado;
+    // la orden de corte mantiene el corte por paño.
+    const measureHeader = confection ? "Medidas paño" : "Corte por paño";
+    return `<table><thead><tr><th>Hab.</th><th>Ancho hueco</th><th>Altura</th><th>Hojas</th><th>${measureHeader}</th><th>Fruncido</th>${confection ? "<th>Bajo</th>" : ""}<th>Observaciones</th></tr></thead><tbody>${rows
       .map((row) => {
         const c = calculateRow(row, project);
-        return `<tr><td><b>${escapeHtml(row.room)}</b></td><td>${formatNumber(c.width)} m</td><td>${formatNumber(c.height)} m</td><td>${c.sheets}</td><td>${formatNumber(c.cutWidth)} × ${formatNumber(c.cutHeight)} m</td><td>${formatNumber(c.gather)}</td>${confection ? `<td>${formatNumber(row.hem ?? project.hem)} m</td>` : ""}<td>${escapeHtml(row.notes || "")}</td></tr>`;
+        const measure = confection
+          ? `${formatNumber(c.panelWidth)} × ${formatNumber(c.finalHeight)} m`
+          : `${formatNumber(c.cutWidth)} × ${formatNumber(c.cutHeight)} m`;
+        return `<tr><td><b>${escapeHtml(row.room)}</b></td><td>${formatNumber(c.width)} m</td><td>${formatNumber(c.height)} m</td><td>${c.sheets}</td><td>${measure}</td><td>${formatNumber(c.gather)}</td>${confection ? `<td>${formatNumber(row.hem ?? project.hem)} m</td>` : ""}<td>${escapeHtml(row.notes || "")}</td></tr>`;
       })
       .join("")}</tbody></table>`;
   }
