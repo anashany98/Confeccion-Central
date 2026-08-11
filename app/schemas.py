@@ -41,7 +41,7 @@ class LoginRequest(ApiModel):
 class UserCreate(ApiModel):
     username: str = Field(min_length=3, max_length=80, pattern=r"^[a-zA-Z0-9._-]+$")
     full_name: str = Field(default="", max_length=160)
-    password: str = Field(min_length=12, max_length=200)
+    password: str = Field(min_length=10, max_length=200)
     role: Role = "office"
     permissions: list[str] | None = None
 
@@ -66,7 +66,7 @@ class UserCreate(ApiModel):
 
 class UserUpdate(ApiModel):
     full_name: str | None = Field(default=None, max_length=160)
-    password: str | None = Field(default=None, min_length=12, max_length=200)
+    password: str | None = Field(default=None, min_length=10, max_length=200)
     role: Role | None = None
     permissions: list[str] | None = None
     active: bool | None = None
@@ -207,14 +207,14 @@ class ImpersonateLog(ApiModel):
 class ChangePasswordRequest(ApiModel):
     """Body para el endpoint POST /api/auth/change-password.
 
-    - new_password: obligatorio, mínimo 12 caracteres (alineado con el form de
+    - new_password: obligatorio, mínimo 10 caracteres (alineado con el form de
       creación de usuarios).
     - current_password: requerido solo cuando el usuario NO tiene el flag
       `must_change_password` activo (cambio voluntario). En el flujo forzado
       por política de seguridad, el flag está activo y se omite.
     """
 
-    new_password: str = Field(min_length=12, max_length=200)
+    new_password: str = Field(min_length=10, max_length=200)
     current_password: str | None = Field(default=None, max_length=200)
 
 

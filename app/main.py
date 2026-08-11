@@ -548,7 +548,7 @@ def change_password(
     - Si el flag `must_change_password` está activo, NO se exige la contraseña
       actual (el usuario acaba de autenticarse para llegar aquí).
     - Si el flag está en False, se exige la contraseña actual para confirmar.
-    - En ambos casos, la nueva contraseña debe tener al menos 12 caracteres
+    - En ambos casos, la nueva contraseña debe tener al menos 10 caracteres
       y se persiste hasheada con scrypt.
     """
     if not user.must_change_password and (

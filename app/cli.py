@@ -18,8 +18,8 @@ def create_admin(username: str | None, full_name: str | None, password: str | No
     password = password or os.getenv("ADMIN_PASSWORD")
     if not password and sys.stdin.isatty():
         password = getpass.getpass("Contraseña del administrador: ")
-    if not password or len(password) < 12:
-        print("La contraseña debe tener al menos 12 caracteres.", file=sys.stderr)
+    if not password or len(password) < 10:
+        print("La contraseña debe tener al menos 10 caracteres.", file=sys.stderr)
         return 2
     with SessionLocal() as db:
         existing = db.scalar(select(User).where(User.username == username))

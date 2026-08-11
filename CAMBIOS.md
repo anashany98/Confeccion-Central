@@ -2,6 +2,10 @@
 
 Fecha de cierre técnico: 29 de julio de 2026.
 
+## Política de contraseñas a 10 caracteres (11 de agosto de 2026)
+
+- El mínimo de contraseña pasa de 12 a 10 caracteres en creación de usuarios, cambio de contraseña y CLI (decisión del negocio; el bloqueo de intentos de acceso se mantiene).
+
 ## Aviso y alerta: alto de corte vs ancho de tela (11 de agosto de 2026)
 
 - Nuevo aviso cuando el alto de corte de una habitación supera el ancho de la tela (no cabe en un solo ancho del rollo): «Alto de corte X m no cabe en el ancho de tela (Y m)».
