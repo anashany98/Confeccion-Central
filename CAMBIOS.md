@@ -2,6 +2,23 @@
 
 Fecha de cierre técnico: 29 de julio de 2026.
 
+## Aviso y alerta: alto de corte vs ancho de tela (11 de agosto de 2026)
+
+- Nuevo aviso cuando el alto de corte de una habitación supera el ancho de la tela (no cabe en un solo ancho del rollo): «Alto de corte X m no cabe en el ancho de tela (Y m)».
+- El aviso aparece en la barra de revisión automática, en el indicador de la fila y en el contador de incidencias (igual que los demás avisos), y dispara una alerta emergente única al detectarlo.
+- También se conectó a la revisión visual el aviso preexistente «Ancho de corte excede el ancho de tela» (antes solo vivía en la lógica pura y sus tests); la alerta emergente cubre ahora ambos casos (ancho o alto).
+- Ambos se añadieron a `calcRowFor` (lógica pura) con sus tests.
+
+## Trabajos independientes por usuario (11 de agosto de 2026)
+
+- `GET /api/jobs` ahora devuelve solo los trabajos del usuario autenticado (`scope=mine`).
+- Nuevo `scope=others` para ver los trabajos de los compañeros (con `created_by` nombre en cada ítem) y `scope=all` exclusivo de administración (`users_manage`).
+- El payload de trabajo incluye `created_by` (id y nombre) para mostrar el autor en la interfaz.
+- Editar (`PUT`) o eliminar (`DELETE`) un trabajo ajeno devuelve 403 salvo administradores.
+- El modal de trabajos tiene dos pestañas: «Mis trabajos» y «Compañeros», con el autor visible en cada tarjeta ajena; los trabajos de compañeros se abren en solo lectura (se pueden ver y duplicar, no editar), y ya no se abre automáticamente un trabajo de otro usuario al entrar.
+- Al crear o duplicar un trabajo se vuelve a la pestaña «Mis trabajos».
+- Tests: alcance por autor, visibilidad de compañeros, 403 en edición/borrado ajeno y `scope=all` restringido; comprobación estática del modal en frontend.
+
 ## Seguridad y configuración
 
 - Configuración tipada y validada en `app/config.py`.

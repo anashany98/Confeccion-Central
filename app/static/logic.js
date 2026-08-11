@@ -107,6 +107,9 @@
     if (fabricWidth > 0 && cutWidth > fabricWidth) {
       issues.push(`Ancho de corte ${fmt(cutWidth)} m excede el ancho de tela (${fmt(fabricWidth)} m)`);
     }
+    if (fabricWidth > 0 && cutHeight > 0 && cutHeight > fabricWidth) {
+      issues.push(`Alto de corte ${fmt(cutHeight)} m no cabe en el ancho de tela (${fmt(fabricWidth)} m)`);
+    }
     if (cutHeight > 0 && cutHeight < 0.4) {
       issues.push(`Alto de corte muy corto: ${fmt(cutHeight)} m (mínimo recomendado 0,4 m)`);
     }

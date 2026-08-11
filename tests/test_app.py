@@ -322,3 +322,60 @@ def test_disabled_api_documentation_returns_not_found() -> None:
     with pytest.raises(HTTPException) as error:
         disabled_api_documentation()
     assert error.value.status_code == 404
+
+
+def test_jobs_are_scoped_by_owner_with_others_tab(client: TestClient) -> None:
+    login(client)  # admin crea un trabajo
+    admin_job_id = new_id()
+    save_job(client, admin_job_id, state=sample_state(admin_job_id, room="101"))
+
+    office_name = f"office_{uuid.uuid4().hex[:8]}"
+    office, office_password = create_user(client, username=office_name, role="office")
+    logout(client)
+
+    # El usuario de oficina solo ve sus propios trabajos en el listado por defecto.
+    login(client, office_name, office_password)
+    mine = client.get("/api/jobs").json()["items"]
+    assert all(item["created_by"]["id"] == office["id"] for item in mine)
+
+    # El trabajo del admin aparece en "compañeros" identificando a su autor.
+    others = client.get("/api/jobs?scope=others").json()["items"]
+    assert any(
+        item["id"] == admin_job_id and item["created_by"]["name"] == "Administrador de pruebas"
+        for item in others
+    )
+
+    # No puede editar ni eliminar un trabajo ajeno.
+    state = sample_state(admin_job_id)
+    state["rows"][0]["height"] = "2.80"
+    assert (
+        client.put(
+            f"/api/jobs/{admin_job_id}",
+            json={
+                "name": "Intento ajeno",
+                "state": state,
+                "versions": [],
+                "expected_version": 1,
+            },
+        ).status_code
+        == 403
+    )
+    assert client.delete(f"/api/jobs/{admin_job_id}").status_code == 403
+    # scope=all es solo de administración.
+    assert client.get("/api/jobs?scope=all").status_code == 403
+
+    # La oficina crea su propio trabajo y el admin lo ve en "compañeros".
+    office_job_id = new_id()
+    save_job(client, office_job_id, state=sample_state(office_job_id, room="202"))
+    mine = client.get("/api/jobs").json()["items"]
+    assert any(item["id"] == office_job_id for item in mine)
+    logout(client)
+
+    login(client)  # admin
+    admin_others = client.get("/api/jobs?scope=others").json()["items"]
+    assert any(
+        item["id"] == office_job_id and item["created_by"]["name"] == office_name
+        for item in admin_others
+    )
+    all_jobs = client.get("/api/jobs?scope=all").json()["items"]
+    assert {item["id"] for item in all_jobs} >= {admin_job_id, office_job_id}

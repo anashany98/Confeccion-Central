@@ -19,6 +19,8 @@
     users: [],
     csrf: null,
     jobs: new Map(),
+    others: new Map(),
+    othersLoaded: false,
   };
 
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -391,7 +393,14 @@
 
   function applyJobLock() {
     const jobId = app.getState()?.jobId;
-    const locked = Boolean(jobId && central.jobs.get(jobId)?.locked);
+    // Bloqueado por una orden aprobada o por ser un trabajo de un compañero
+    // (solo lectura): en ambos casos la edición queda deshabilitada.
+    const locked = Boolean(
+      jobId &&
+      (central.jobs.get(jobId)?.locked ||
+        central.others.has(jobId) ||
+        app.isReadOnlyJob(jobId)),
+    );
     document.body.classList.toggle("job-locked", locked);
     const controls = [
       "#view-relacion [data-project]",
@@ -405,6 +414,15 @@
     $$(controls.join(",")).forEach((control) => {
       control.disabled = locked;
     });
+  }
+
+  async function loadOthersJobs() {
+    const result = await api("/api/jobs?scope=others");
+    central.others.clear();
+    result.items.forEach((item) => central.others.set(item.id, item));
+    central.othersLoaded = true;
+    app.setOthersJobs(result.items);
+    return result.items;
   }
 
   async function refreshCentralJobs() {
@@ -423,6 +441,8 @@
     app.setJobsData(mapRemoteJobs(result.items));
     central.hydrating = false;
     setSync("saved", "Sincronizado");
+    // Mantener fresca la pestaña de compañeros si ya se abrió alguna vez.
+    if (central.othersLoaded) loadOthersJobs().catch(() => {});
     applyJobLock();
     renderCurrentJobCard();
     await checkLocalDrafts(result.items);
@@ -487,6 +507,7 @@
 
   async function bootstrapSession() {
     injectSessionControls();
+    app.setOthersLoader(loadOthersJobs);
     try {
       const catalog = await api("/api/permissions");
       const groupFor = (key) =>
@@ -524,6 +545,10 @@
     if (!state?.jobId) return;
     if (central.jobs.get(state.jobId)?.locked) {
       setSync("conflict", "Trabajo bloqueado");
+      return;
+    }
+    if (central.others.has(state.jobId) || app.isReadOnlyJob(state.jobId)) {
+      setSync("saved", "Solo lectura");
       return;
     }
     central.pendingSaves.set(state.jobId, {
@@ -1530,6 +1555,7 @@
 
   function bindEvents() {
     window.addEventListener("egea:save", (event) => queueSave(event.detail));
+    window.addEventListener("egea:job-opened", () => applyJobLock());
     window.addEventListener("egea:job-create", (event) => {
       const job = event.detail?.job;
       if (job) queueSave({ state: job.state, job });

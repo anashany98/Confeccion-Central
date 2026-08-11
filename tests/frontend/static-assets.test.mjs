@@ -27,6 +27,22 @@ test("las respuestas API no se almacenan en la caché", () => {
   assert.match(serviceWorker, /url\.pathname\.startsWith\(["']\/api\/["']\)/);
 });
 
+test("los avisos de ancho/alto de corte vs ancho de tela llegan a la revisión visual", () => {
+  assert.match(index, /Ancho de corte .*excede el ancho de tela/);
+  assert.match(index, /Alto de corte .*no cabe en el ancho de tela/);
+  assert.match(index, /t\.includes\('ancho de tela'\)/);
+});
+
+test("el modal de trabajos separa los propios de los de compañeros", () => {
+  assert.match(index, /data-job-scope="mine"/);
+  assert.match(index, /data-job-scope="others"/);
+  assert.match(index, /Mis trabajos/);
+  assert.match(index, /Compañeros/);
+  assert.match(index, /setOthersJobs/);
+  assert.match(central, /scope=others/);
+  assert.match(central, /isReadOnlyJob/);
+});
+
 test("los scripts embebidos son JavaScript válido", () => {
   const scripts = [
     ...index.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi),

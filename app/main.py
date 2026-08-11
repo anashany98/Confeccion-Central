@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -44,10 +44,10 @@ from .permissions import (
 )
 from .schemas import (
     ChangePasswordRequest,
+    ImpersonateLog,
     JobSave,
     LoginRequest,
     OrderCreate,
-    ImpersonateLog,
     PrintLogCreate,
     ReopenRequest,
     StatusUpdate,
@@ -174,6 +174,10 @@ def job_payload(job: Job, include_state: bool = True) -> dict[str, Any]:
         "fabric": project.get("fabricName") or project.get("fabricType") or "",
         "created_at": job.created_at.isoformat(),
         "updated_at": job.updated_at.isoformat(),
+        "created_by": {
+            "id": job.created_by_id,
+            "name": (job.created_by.full_name or job.created_by.username) if job.created_by else "",
+        },
         "updated_by": job.updated_by.full_name or job.updated_by.username if job.updated_by else "",
     }
     if include_state:
@@ -304,10 +308,12 @@ app = FastAPI(
 
 # Sentry (opcional: solo se inicializa si SENTRY_DSN está definido).
 if settings.sentry_dsn:
+    import logging
+
     import sentry_sdk
     from sentry_sdk.integrations.fastapi import FastApiIntegration
-    from sentry_sdk.integrations.starlette import StarletteIntegration
     from sentry_sdk.integrations.logging import LoggingIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
 
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
@@ -318,7 +324,7 @@ if settings.sentry_dsn:
         integrations=[
             FastApiIntegration(transaction_style="url"),
             StarletteIntegration(),
-            LoggingIntegration(level=None, event_level="ERROR"),
+            LoggingIntegration(level=None, event_level=logging.ERROR),
         ],
         before_send_transaction=lambda event, hint: None,  # No enviar transactions
     )
@@ -545,13 +551,11 @@ def change_password(
     - En ambos casos, la nueva contraseña debe tener al menos 12 caracteres
       y se persiste hasheada con scrypt.
     """
-    if not user.must_change_password:
-        if not payload.current_password or not verify_password(
-            payload.current_password, user.password_hash
-        ):
-            raise HTTPException(
-                status_code=400, detail="Contraseña actual incorrecta"
-            )
+    if not user.must_change_password and (
+        not payload.current_password
+        or not verify_password(payload.current_password, user.password_hash)
+    ):
+        raise HTTPException(status_code=400, detail="Contraseña actual incorrecta")
     forced_change = user.must_change_password  # antes de desactivarlo
     user.password_hash = hash_password(payload.new_password)
     user.password_changed_at = utcnow()
@@ -729,6 +733,7 @@ def _sync_rooms(db: Session, job: Job, state: dict[str, Any]) -> None:
 
 @app.get("/api/jobs")
 def list_jobs(
+    scope: str = Query(default="mine", pattern="^(mine|others|all)$"),
     include_deleted: bool = False,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=100, ge=1, le=200),
@@ -737,6 +742,18 @@ def list_jobs(
 ) -> dict[str, Any]:
     query = select(Job)
     count_query = select(func.count(Job.id))
+    # Los trabajos son por autor: "mine" son los propios, "others" los de los
+    # compañeros y "all" (solo administración) todos.
+    if scope == "all":
+        _require_user_permission(user, "users_manage")
+        owner_cond = None
+    elif scope == "others":
+        owner_cond = or_(Job.created_by_id != user.id, Job.created_by_id.is_(None))
+    else:
+        owner_cond = Job.created_by_id == user.id
+    if owner_cond is not None:
+        query = query.where(owner_cond)
+        count_query = count_query.where(owner_cond)
     if not include_deleted:
         query = query.where(Job.deleted_at.is_(None))
         count_query = count_query.where(Job.deleted_at.is_(None))
@@ -765,6 +782,8 @@ def save_job(
     job = db.scalar(select(Job).where(Job.id == job_id).with_for_update())
     is_new = job is None
     _require_user_permission(user, "jobs_create" if is_new else "jobs_edit")
+    if job and job.created_by_id != user.id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Solo el autor del trabajo puede editarlo")
     if job and job.deleted_at:
         raise HTTPException(status_code=410, detail="El trabajo fue eliminado")
     if job and job.locked_at:
@@ -862,6 +881,8 @@ def delete_job(
         raise HTTPException(
             status_code=423, detail="No se puede eliminar un trabajo con una orden vigente"
         )
+    if job.created_by_id != user.id and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Solo el autor del trabajo puede eliminarlo")
     job.deleted_at = utcnow()
     job.updated_by_id = user.id
     add_audit(
@@ -962,7 +983,9 @@ def audit_impersonate_start(
     if not target:
         raise HTTPException(status_code=404, detail="Usuario objetivo no encontrado")
     if target.id == current.id:
-        raise HTTPException(status_code=400, detail="No tiene sentido impersonar a tu propio usuario")
+        raise HTTPException(
+            status_code=400, detail="No tiene sentido impersonar a tu propio usuario"
+        )
     add_audit(
         db,
         request,
@@ -1378,6 +1401,7 @@ def frontend_config() -> Response:
     }
     # JSON.stringify evita inyección; se sirve como JS ejecutable.
     import json as _json
+
     body = f"window.APP_CONFIG={_json.dumps(payload)};"
     return Response(content=body, media_type="application/javascript; charset=utf-8")
 

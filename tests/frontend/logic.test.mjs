@@ -90,6 +90,16 @@ test("calcRow avisa con alto de corte fuera de rango", () => {
   assert.ok(largo.issues.some((i) => i.includes("rollo habitual")));
 });
 
+test("calcRow avisa si el alto de corte no cabe en el ancho de tela", () => {
+  // Tela de 2,80 m: una cortina de 3,00 no cabe en un solo ancho.
+  const alto = calcRowFor(row({ width: "1,5", height: "3" }), project());
+  assert.equal(alto.ok, false);
+  assert.ok(alto.issues.some((i) => i.includes("no cabe en el ancho de tela")));
+  // Un alto normal (2,70) cabe sin aviso.
+  const normal = calcRowFor(row({ width: "1,5", height: "2,7" }), project());
+  assert.ok(!normal.issues.some((i) => i.includes("no cabe en el ancho de tela")));
+});
+
 test("splitExcelText: tabulaciones, punto y coma y comillas", () => {
   assert.deepEqual(splitExcelText("1101\t4,75\t2,81\n1102\t3,1\t2,2\n"), [
     ["1101", "4,75", "2,81"],

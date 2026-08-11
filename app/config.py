@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import secrets
 import sys
@@ -49,10 +50,8 @@ def _dev_session_secret() -> str:
         secret_file.parent.mkdir(parents=True, exist_ok=True)
         value = secrets.token_urlsafe(48)
         secret_file.write_text(value)
-        try:
+        with contextlib.suppress(OSError):  # Windows: permisos POSIX no aplicables
             os.chmod(secret_file, 0o600)
-        except OSError:
-            pass  # Windows: permisos POSIX no aplicables
         return value
     except OSError:
         return secrets.token_urlsafe(48)
@@ -128,9 +127,9 @@ def load_settings() -> Settings:
     # Si el operador pegó `postgres://` (alias de libpq) o `postgresql://`
     # sin driver, lo normalizamos al driver psycopg.
     if database_url.startswith("postgres://"):
-        database_url = "postgresql+psycopg://" + database_url[len("postgres://"):]
+        database_url = "postgresql+psycopg://" + database_url[len("postgres://") :]
     elif database_url.startswith("postgresql://"):
-        database_url = "postgresql+psycopg" + database_url[len("postgresql"):]
+        database_url = "postgresql+psycopg" + database_url[len("postgresql") :]
 
     return Settings(
         app_env=app_env,
