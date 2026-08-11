@@ -39,7 +39,7 @@ class LoginRequest(ApiModel):
 
 
 class UserCreate(ApiModel):
-    username: str = Field(min_length=3, max_length=80, pattern=r"^[a-zA-Z0-9._-]+$")
+    username: str = Field(min_length=3, max_length=80, pattern=r"^[a-zA-Z0-9._@-]+$")
     full_name: str = Field(default="", max_length=160)
     password: str = Field(min_length=10, max_length=200)
     role: Role = "office"
@@ -49,8 +49,9 @@ class UserCreate(ApiModel):
     @classmethod
     def normalize_username(cls, value: str) -> str:
         value = value.strip().lower()
-        if not re.fullmatch(r"[a-z0-9._-]{3,80}", value):
-            raise ValueError("Use letras, números, punto, guion o guion bajo")
+        # Permite el correo completo (con @) o un usuario clásico.
+        if not re.fullmatch(r"[a-z0-9._@-]{3,80}", value):
+            raise ValueError("Use un correo o letras, números, punto, guion o guion bajo")
         return value
 
     @field_validator("permissions")

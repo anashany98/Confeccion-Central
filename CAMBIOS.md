@@ -2,6 +2,12 @@
 
 Fecha de cierre técnico: 29 de julio de 2026.
 
+## Acceso con correo completo como usuario (11 de agosto de 2026)
+
+- El nombre de usuario acepta ahora el correo completo (con `@`): `UserCreate` admite `[a-z0-9._@-]` en lugar de prohibir la `@`, manteniendo el resto de validación (3-80 caracteres, normalización a minúsculas).
+- Los usuarios ya creados pueden convertirse a su correo con un `UPDATE` (script `tmp/a_email.sql`, idempotente por username exacto).
+- Test nuevo: un usuario creado con correo entra sin problemas por la API.
+
 ## Política de contraseñas a 10 caracteres (11 de agosto de 2026)
 
 - El mínimo de contraseña pasa de 12 a 10 caracteres en creación de usuarios, cambio de contraseña y CLI (decisión del negocio; el bloqueo de intentos de acceso se mantiene).

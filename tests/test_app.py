@@ -299,6 +299,16 @@ def test_password_change_revokes_existing_session(client: TestClient) -> None:
     assert second.get("/api/auth/me").status_code == 401
 
 
+def test_usernames_accept_full_email(client: TestClient) -> None:
+    login(client)
+    email = f"prueba{uuid.uuid4().hex[:6]}@correo.com"
+    email_user, email_password = create_user(client, username=email, role="office")
+    assert email_user["username"] == email
+    logout(client)
+    payload = login(client, email, email_password)
+    assert payload["user"]["id"] == email_user["id"]
+
+
 def test_production_defaults_are_not_exposed_in_api(client: TestClient) -> None:
     assert client.get("/docs").status_code == 200
     login(client)
