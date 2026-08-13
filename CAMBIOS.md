@@ -2,6 +2,14 @@
 
 Fecha de cierre técnico: 29 de julio de 2026.
 
+## Etiquetas en formato ZPL nativo (Zebra) (13 de agosto de 2026)
+
+- Botón «ZPL Zebra» en la vista de etiquetas: genera el **código ZPL nativo** (el formato que entiende una impresora de etiquetas Zebra) de todas las etiquetas filtradas, con el tamaño elegido (40×60, 40×50, …).
+- Cada etiqueta es un bloque `^XA … ^XZ` con `^PW`/`^LL` del tamaño elegido, `^MTT` (transferencia térmica para la cinta de resina 5095), `^CI28` (UTF-8) y código de barras Code 128 con el comando nativo `^BC` de Zebra más el texto legible debajo.
+- El modal permite **copiar** el ZPL o **descargar un archivo .prn** (UTF-8).
+- Nuevo script `scripts/send_zpl.py` para enviar el .prn a la impresora por red: `python scripts/send_zpl.py <IP> etiquetas.prn` (puerto 9100, raw). También puede imprimirse desde Windows con la Zebra instalada (ZDesigner).
+- Tests: estructura del ZPL (PW/LL/MTT/CI28/BC/escapado de caracteres especiales) y comprobación estática del botón, modal y script.
+
 ## Modo de impresión a etiqueta Zebra con tamaños configurables (13 de agosto de 2026)
 
 - Nuevo botón «Imprimir 40 mm» en la vista de etiquetas: imprime una etiqueta por página al tamaño exacto de etiqueta, sin portada ni márgenes, pensado para impresoras de etiquetas con controlador ZDesigner (Zebra ZT231 y similares).

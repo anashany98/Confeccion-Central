@@ -606,7 +606,7 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
 
       <section class="view" id="view-etiquetas">
         <div class="page-head"><div><h1>Etiquetas de paños</h1><p>Una etiqueta por hoja para coser en el tejido, con código de barras de trazabilidad.</p></div><div class="page-actions"><button class="btn" id="printLabelsZebraBtn" title="Imprime una etiqueta por página a 40×60 mm para impresora de etiquetas (Zebra)">Imprimir 40 mm</button><button class="btn primary" id="printLabelsBtn">Imprimir etiquetas (A4)</button></div></div>
-        <div class="label-toolbar no-print"><input class="search" id="labelSearch" placeholder="Buscar habitación"><select id="labelStatusFilter"><option value="all">Todos los estados</option><option value="">Sin estado</option><option value="measured">Medida revisada</option><option value="cut">Cortada</option><option value="sewn">Confeccionada</option><option value="installed">Instalada</option></select><select id="zebraLabelSize" title="Tamaño de etiqueta para la impresora Zebra (debe coincidir con el controlador ZDesigner)"><option value="40x60">Etiqueta Zebra 40 × 60 mm</option><option value="40x50">Etiqueta Zebra 40 × 50 mm</option><option value="40x80">Etiqueta Zebra 40 × 80 mm</option><option value="50x60">Etiqueta Zebra 50 × 60 mm</option><option value="60x60">Etiqueta Zebra 60 × 60 mm</option></select><strong id="labelCount">0 etiquetas</strong></div>
+        <div class="label-toolbar no-print"><input class="search" id="labelSearch" placeholder="Buscar habitación"><select id="labelStatusFilter"><option value="all">Todos los estados</option><option value="">Sin estado</option><option value="measured">Medida revisada</option><option value="cut">Cortada</option><option value="sewn">Confeccionada</option><option value="installed">Instalada</option></select><select id="zebraLabelSize" title="Tamaño de etiqueta para la impresora Zebra (debe coincidir con el controlador ZDesigner)"><option value="40x60">Etiqueta Zebra 40 × 60 mm</option><option value="40x50">Etiqueta Zebra 40 × 50 mm</option><option value="40x80">Etiqueta Zebra 40 × 80 mm</option><option value="50x60">Etiqueta Zebra 50 × 60 mm</option><option value="60x60">Etiqueta Zebra 60 × 60 mm</option></select><button class="btn" id="zplBtn" title="Genera el código ZPL (formato nativo de impresora de etiquetas Zebra) con el código de barras, listo para enviar a la impresora">ZPL Zebra</button><strong id="labelCount">0 etiquetas</strong></div>
         <div class="labels-grid" id="labelsGrid"></div>
       </section>
 
@@ -793,6 +793,11 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
 <div class="modal-backdrop" id="trashModal"><div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><h3>Papelera</h3><button class="btn icon" data-close="trashModal">×</button></div><div class="modal-body"><div class="trash-list" id="trashList"></div></div><div class="modal-foot"><button class="btn" data-close="trashModal">Cerrar</button></div></div></div>
 
 <div class="modal-backdrop" id="historyModal"><div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><h3>Historial y versiones</h3><button class="btn icon" data-close="historyModal">×</button></div><div class="modal-body"><div class="modal-toolbar"><span>Guarde puntos de restauración antes de cambios importantes.</span><button class="btn primary" id="saveVersionBtn">Guardar versión ahora</button></div><div class="history-list" id="historyList"></div><div class="central-history-block"><h4>Historial central del servidor</h4><div id="centralHistoryList" class="central-history-list"><div class="empty">Cargando historial…</div></div></div></div><div class="modal-foot"><button class="btn" data-close="historyModal">Cerrar</button></div></div></div>
+<div class="modal-backdrop" id="zplModal"><div class="modal" role="dialog" aria-modal="true" style="max-width:660px">
+  <div class="modal-head"><h3>Código ZPL para Zebra</h3><button class="btn icon" data-close="zplModal" aria-label="Cerrar">×</button></div>
+  <div class="modal-body"><div class="note"><b>Formato nativo de impresora de etiquetas (ZPL).</b> El tamaño de etiqueta es el elegido en el toolbar (arriba). Para imprimir: descarga el archivo y envíalo a la Zebra por red con <code>python scripts/send_zpl.py &lt;IP_de_la_Zebra&gt; etiquetas.prn</code> (puerto 9100), o imprime el archivo desde Windows con la Zebra instalada (controlador ZDesigner).</div><textarea id="zplOutput" readonly spellcheck="false" aria-label="Código ZPL generado" style="width:100%;height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;white-space:pre;border:1px solid var(--line);border-radius:8px;padding:10px;background:#fafbfc;color:#111;box-sizing:border-box"></textarea></div>
+  <div class="modal-foot"><button class="btn" id="zplCopyBtn">Copiar</button><button class="btn" id="zplDownloadBtn">Descargar .prn</button><button class="btn primary" data-close="zplModal">Cerrar</button></div>
+</div></div>
 
 <script src="/static/vendor/xlsx.full.min.js"></script>
 <script src="/static/logic.js"></script>
@@ -1373,27 +1378,53 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
     return `<svg class="label-barcode" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" preserveAspectRatio="none" role="img" aria-label="Código de barras de trazabilidad">${bars}</svg>`;
   };
 
-  function renderLabels(){
+  // Etiquetas actuales (con el filtro del toolbar): una por hoja (paño).
+  function currentLabels(){
     const filter=q('#labelStatusFilter')?.value||state.labelFilter||'all';state.labelFilter=filter;
     const search=(q('#labelSearch')?.value||'').trim().toLowerCase();
     const rows=readyRows().filter(r=>(filter==='all'||(r.status||'')===filter)&&(!search||String(r.room).toLowerCase().includes(search)));
     const allGroups=allGroupedCuts();
-    // Una etiqueta por hoja (paño) para coserla en el tejido, con código de barras de trazabilidad.
-    const labels=rows.flatMap(r=>{
+    const items=[];
+    rows.forEach(r=>{
       const c=calcRow(r),groupIndex=allGroups.findIndex(g=>g.key===cutKey(c))+1;
-      return Array.from({length:c.sheets},(_,i)=>{
+      for(let i=0;i<c.sheets;i++){
         const sheet=i+1;
         const side=c.sheets===1?'ÚNICA':i===0?'IZQ':i===1?'DER':`HOJA ${sheet}`;
-        const code=traceCode(r.room,sheet);
-        const pattern=code128Pattern(code);
-        const barcode=pattern?barcodeSvg(pattern,28):'';
-        return `<article class="fabric-label"><div class="label-top"><span class="label-hotel">${esc(state.project.hotel||'OBRA')}</span><span class="label-code">CORTE C-${String(groupIndex).padStart(2,'0')}</span></div><div class="label-room">HAB. ${esc(r.room)}</div><div class="label-size">${fmt(c.cutWidth)} × ${fmt(c.cutHeight)} m</div><div class="label-sheet">HOJA ${sheet}/${c.sheets} · ${side}</div><div class="label-meta"><span><b>Hueco</b><br>${fmt(c.width)} × ${fmt(c.height)} m</span><span><b>Fruncido</b><br>${fmt(c.gather)}</span><span><b>Tela</b><br>${esc(state.project.fabricName||state.project.fabricType)}</span><span><b>Fecha</b><br>${formatDate(state.project.date)}</span></div><div class="label-barcode-wrap">${barcode}<span class="label-trace">${esc(code)}</span></div></article>`;
-      });
+        items.push({
+          hotel:state.project.hotel||'OBRA',
+          corte:`CORTE C-${String(groupIndex).padStart(2,'0')}`,
+          room:`HAB. ${r.room}`,
+          size:`${fmt(c.cutWidth)} × ${fmt(c.cutHeight)} m`,
+          sheet:`HOJA ${sheet}/${c.sheets} · ${side}`,
+          meta1:`Hueco ${fmt(c.width)} × ${fmt(c.height)} m · Fruncido ${fmt(c.gather)}`,
+          meta2:`Tela ${state.project.fabricName||state.project.fabricType} · ${formatDate(state.project.date)}`,
+          code:traceCode(r.room,sheet),
+        });
+      }
+    });
+    return items;
+  }
+
+  function renderLabels(){
+    const labels=currentLabels().map(l=>{
+      const pattern=code128Pattern(l.code);
+      const barcode=pattern?barcodeSvg(pattern,28):'';
+      return `<article class="fabric-label"><div class="label-top"><span class="label-hotel">${esc(l.hotel)}</span><span class="label-code">${esc(l.corte)}</span></div><div class="label-room">${esc(l.room)}</div><div class="label-size">${esc(l.size)}</div><div class="label-sheet">${esc(l.sheet)}</div><div class="label-meta"><span><b>Hueco</b><br>${esc(l.meta1.replace(/ · Fruncido.*/,''))}</span><span><b>Fruncido</b><br>${esc(l.meta1.split(' · Fruncido ')[1]||'')}</span><span><b>Tela</b><br>${esc(l.meta2.split(' · ')[0])}</span><span><b>Fecha</b><br>${esc(l.meta2.split(' · ')[1]||'')}</span></div><div class="label-barcode-wrap">${barcode}<span class="label-trace">${esc(l.code)}</span></div></article>`;
     });
     q('#labelsGrid').innerHTML=labels.length?labels.join(''):emptyState({icon:'▣',title:'Sin etiquetas',text:readyRows().length?'Ninguna etiqueta coincide con el filtro actual.':'Las etiquetas se generan a partir de la relación de huecos: una por hoja (paño) con código de barras de trazabilidad para coser en el tejido.',actions:readyRows().length?[]:[{label:'Ir a Datos y huecos',gotoView:'relacion',primary:true}]});
     q('#labelCount').textContent=`${labels.length} etiqueta${labels.length===1?'':'s'}`;
     if(q('#labelStatusFilter'))q('#labelStatusFilter').value=state.labelFilter||'all';
     if(q('#zebraLabelSize'))q('#zebraLabelSize').value=state.zebraLabelSize||'40x60';
+  }
+
+  // Código ZPL (formato nativo de impresora de etiquetas Zebra) de las etiquetas filtradas.
+  function showZpl(){
+    const items=currentLabels();
+    const size=String(q('#zebraLabelSize')?.value||'40x60').split('x');
+    const w=parseInt(size[0],10)||40,h=parseInt(size[1],10)||60;
+    const zpl=items.map(l=>zebraZpl(l,w,h)).join('\n\n');
+    q('#zplOutput').value=zpl||'; Sin etiquetas para este filtro';
+    openModal('zplModal');
   }
 
   function renderJobs(){
@@ -2082,6 +2113,18 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
     q('#resetChecksBtn').addEventListener('click',()=>{checkpoint('Reiniciar check list');state.checks={};save();renderChecklist()});
     q('#printLabelsBtn')?.addEventListener('click',()=>printView('etiquetas'));
     q('#printLabelsZebraBtn')?.addEventListener('click',()=>printLabelsZebra());
+    q('#zplBtn')?.addEventListener('click',()=>showZpl());
+    q('#zplCopyBtn')?.addEventListener('click',async()=>{
+      const v=q('#zplOutput')?.value||'';if(!v){toast('No hay código ZPL que copiar');return}
+      try{await navigator.clipboard.writeText(v);toast('ZPL copiado al portapapeles')}
+      catch{toast('No se pudo copiar automáticamente; usa Ctrl+A y Ctrl+C')}
+    });
+    q('#zplDownloadBtn')?.addEventListener('click',()=>{
+      const v=q('#zplOutput')?.value||'';if(!v){toast('No hay código ZPL que descargar');return}
+      const blob=new Blob([v],{type:'text/plain;charset=utf-8'});
+      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=safeFileName(`etiquetas_${state.project.hotel||'trabajo'}`)+'.prn';a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+    });
     // Escape cierra modales abiertos y menús desplegables (askModal gestiona el suyo en captura).
     document.addEventListener('keydown',e=>{
       if(e.key!=='Escape')return;

@@ -4,7 +4,7 @@ import test from "node:test";
 
 const require = createRequire(import.meta.url);
 const L = require("../../app/static/logic.js");
-const { num, round, fmt, parseDimension, calcRowFor, splitExcelText, detectExcelColumns, statusFromValue, FIXED_CLOSURE_ADD, code128Pattern } = L;
+const { num, round, fmt, parseDimension, calcRowFor, splitExcelText, detectExcelColumns, statusFromValue, FIXED_CLOSURE_ADD, code128Pattern, zebraZpl } = L;
 
 // Proyecto por defecto de la app (misma forma que defaultState().project).
 const project = () => ({ mode: 2, fabricWidth: 2.8, heightDiscount: 0.02, hem: 0.25, gather: 2, priceFabric: 0, priceConfection: 0, priceInstallation: 0, margin: 0 });
@@ -154,6 +154,37 @@ test("code128Pattern genera Code 128B con Start B, dígito de control y Stop", (
   assert.ok(p.startsWith("211214"));
   assert.ok(p.endsWith("2331112"));
   assert.match(p, /^[1-4]+$/);
+});
+
+test("zebraZpl genera ZPL nativo de etiqueta con barras Code 128", () => {
+  const z = zebraZpl(
+    {
+      hotel: "Hotel Prueba",
+      corte: "CORTE C-01",
+      room: "HAB. 101",
+      size: "2,40 × 2,67 m",
+      sheet: "HOJA 1/2 · IZQ",
+      meta1: "Hueco 2,40 × 2,68 m · Fruncido 2,00",
+      meta2: "Tela oscurante · 04/08/2026",
+      code: "CC-4F4953-101-H1",
+    },
+    40,
+    60
+  );
+  assert.ok(z.startsWith("^XA"));
+  assert.ok(z.endsWith("^XZ"));
+  assert.match(z, /\^PW320/); // 40 mm a 203 dpi
+  assert.match(z, /\^LL480/); // 60 mm a 203 dpi
+  assert.match(z, /\^MTT/); // transferencia térmica
+  assert.match(z, /\^CI28/);
+  assert.match(z, /\^BCN,\d+,N,N,N/); // código de barras sin HRI (texto propio debajo)
+  assert.match(z, /\^FDCC-4F4953-101-H1\^FS/);
+  // Caracteres especiales de ZPL escapados.
+  const esc = zebraZpl({ ...{ hotel: "Obra^Hotel~1", corte: "", room: "", size: "", sheet: "", meta1: "", meta2: "", code: "A" } }, 40, 60);
+  assert.match(esc, /Obra\\\^Hotel\\~1/);
+  // Otro tamaño de etiqueta: 50×60 mm.
+  const z50 = zebraZpl({ hotel: "", corte: "", room: "", size: "", sheet: "", meta1: "", meta2: "", code: "A" }, 50, 60);
+  assert.match(z50, /\^PW400/);
 });
 
 test("statusFromValue mapea texto a estado de producción", () => {

@@ -67,6 +67,14 @@ test("el tamaño de etiqueta Zebra es configurable en el toolbar", () => {
   assert.match(index, /state\.zebraLabelSize=e\.target\.value/);
 });
 
+test("las etiquetas se generan también en ZPL nativo (formato Zebra)", () => {
+  assert.match(index, /id="zplBtn"/);
+  assert.match(index, /zebraZpl/);
+  assert.match(index, /id="zplOutput"/);
+  assert.match(index, /send_zpl\.py/);
+  assert.match(index, /Descargar \.prn/);
+});
+
 test("el añadido de cierre es un desplegable de 0,06 u 0,15 m enlazado al proyecto", () => {
   assert.match(index, /id="p-closureAdd"/);
   assert.match(index, /option value="0\.06"/);

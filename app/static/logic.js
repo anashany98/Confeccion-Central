@@ -231,6 +231,48 @@
     return symbols.map((v) => CODE128_PATTERNS[v]).join("");
   }
 
+  // Resolución de referencia de las impresoras Zebra (puntos por mm) para ZPL.
+  const DOTS_PER_MM = 203 / 25.4; // ≈ 8 puntos/mm
+
+  // Escapa el texto de un campo ^FD de ZPL (^, ~ y \ son especiales).
+  function _zplEscape(text) {
+    return String(text ?? "")
+      .replace(/[\r\n]+/g, " ")
+      .replace(/\\/g, "\\\\")
+      .replace(/\^/g, "\\^")
+      .replace(/~/g, "\\~");
+  }
+
+  // Genera el código ZPL (formato nativo de impresora de etiquetas Zebra) de una etiqueta.
+  // label: {hotel, corte, room, size, sheet, meta1, meta2, code}
+  // widthMm / heightMm: tamaño de la etiqueta (por defecto 40×60 mm).
+  function zebraZpl(label, widthMm = 40, heightMm = 60) {
+    const d = DOTS_PER_MM;
+    const pw = Math.round(widthMm * d),
+      ll = Math.round(heightMm * d);
+    const e = _zplEscape;
+    const x = (mm) => Math.round(mm * d);
+    const y = (mm) => Math.round(mm * d);
+    return [
+      "^XA",
+      `^PW${pw}`, // ancho de impresión (dots)
+      `^LL${ll}`, // longitud de etiqueta (dots)
+      "^MTT", // transferencia térmica (cinta de resina)
+      "^CI28", // UTF-8
+      "^LH0,0",
+      `^FO${x(3)},${y(2)}^A0N,${y(2.5)},${y(2.5)}^FD${e(label.hotel)}^FS`,
+      `^FO${x(3)},${y(6)}^A0N,${y(2)},${y(2)}^FD${e(label.corte)}^FS`,
+      `^FO${x(3)},${y(9)}^A0N,${y(5)},${y(3.5)}^FD${e(label.room)}^FS`,
+      `^FO${x(3)},${y(15)}^A0N,${y(3.8)},${y(3.8)}^FD${e(label.size)}^FS`,
+      `^FO${x(3)},${y(19.5)}^A0N,${y(2.2)},${y(2.2)}^FD${e(label.sheet)}^FS`,
+      `^FO${x(3)},${y(23)}^A0N,${y(1.8)},${y(1.8)}^FD${e(label.meta1)}^FS`,
+      `^FO${x(3)},${y(25.5)}^A0N,${y(1.8)},${y(1.8)}^FD${e(label.meta2)}^FS`,
+      `^FO${x(3)},${y(28.5)}^BY1,2.5^BCN,${y(9)},N,N,N^FD${e(label.code)}^FS`,
+      `^FO${x(3)},${y(38.5)}^A0N,${y(1.8)},${y(1.8)}^FD${e(label.code)}^FS`,
+      "^XZ",
+    ].join("\n");
+  }
+
   return {
     FIXED_CLOSURE_ADD,
     num,
@@ -244,5 +286,6 @@
     detectExcelColumns,
     statusFromValue,
     code128Pattern,
+    zebraZpl,
   };
 });
