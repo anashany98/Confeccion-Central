@@ -29,6 +29,7 @@ test("las respuestas API no se almacenan en la caché", () => {
 
 test("los avisos de ancho/alto de corte vs ancho de tela llegan a la revisión visual", () => {
   assert.match(index, /Ancho de corte .*excede el ancho de tela/);
+  assert.match(index, /Ancho de corte .*a menos de 10 cm del ancho de tela/);
   assert.match(index, /Alto de corte .*no cabe en el ancho de tela/);
   assert.match(index, /t\.includes\('ancho de tela'\)/);
 });
@@ -41,6 +42,36 @@ test("el modal de trabajos separa los propios de los de compañeros", () => {
   assert.match(index, /setOthersJobs/);
   assert.match(central, /scope=others/);
   assert.match(central, /isReadOnlyJob/);
+});
+
+test("las etiquetas de paños llevan código de barras de trazabilidad para coser", () => {
+  assert.match(index, /code128Pattern/);
+  assert.match(index, /traceCode/);
+  assert.match(index, /label-barcode-wrap/);
+  assert.match(index, /label-trace/);
+  assert.match(index, /HOJA \$\{sheet\}\/\$\{c\.sheets\}/);
+});
+
+test("hay modo de impresión a etiqueta de 40 mm (Zebra) con una por página", () => {
+  assert.match(index, /printLabelsZebra/);
+  assert.match(index, /@page zebra-40x60\{size:40mm 60mm/);
+  assert.match(index, /body\.zebra-print/);
+  assert.match(index, /page-break-after:always/);
+});
+
+test("el tamaño de etiqueta Zebra es configurable en el toolbar", () => {
+  assert.match(index, /id="zebraLabelSize"/);
+  assert.match(index, /@page zebra-40x50\{size:40mm 50mm/);
+  assert.match(index, /@page zebra-40x80\{size:40mm 80mm/);
+  assert.match(index, /@page zebra-50x60\{size:50mm 60mm/);
+  assert.match(index, /state\.zebraLabelSize=e\.target\.value/);
+});
+
+test("el añadido de cierre es un desplegable de 0,06 u 0,15 m enlazado al proyecto", () => {
+  assert.match(index, /id="p-closureAdd"/);
+  assert.match(index, /option value="0\.06"/);
+  assert.match(index, /option value="0\.15"/);
+  assert.match(index, /'p-closureAdd':'closureAdd'/);
 });
 
 test("los scripts embebidos son JavaScript válido", () => {

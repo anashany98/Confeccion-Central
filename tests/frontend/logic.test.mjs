@@ -4,7 +4,7 @@ import test from "node:test";
 
 const require = createRequire(import.meta.url);
 const L = require("../../app/static/logic.js");
-const { num, round, fmt, parseDimension, calcRowFor, splitExcelText, detectExcelColumns, statusFromValue, FIXED_CLOSURE_ADD } = L;
+const { num, round, fmt, parseDimension, calcRowFor, splitExcelText, detectExcelColumns, statusFromValue, FIXED_CLOSURE_ADD, code128Pattern } = L;
 
 // Proyecto por defecto de la app (misma forma que defaultState().project).
 const project = () => ({ mode: 2, fabricWidth: 2.8, heightDiscount: 0.02, hem: 0.25, gather: 2, priceFabric: 0, priceConfection: 0, priceInstallation: 0, margin: 0 });
@@ -47,6 +47,14 @@ test("parseDimension: conversión por magnitud (cm/mm estimados)", () => {
   assert.deepEqual(parseDimension("2,8"), { value: 2.8, converted: false, source: "m" });
 });
 
+test("calcRow usa el añadido de cierre del proyecto (0,06 u 0,15 m)", () => {
+  const c15 = calcRowFor(row({ width: "4,75", gather: "1,5", sheets: 2 }), { ...project(), closureAdd: 0.15 });
+  assert.equal(round(c15.panelWidth, 4), round(4.75 / 2 + 0.15, 4));
+  // Sin closureAdd (proyectos antiguos) cae al valor por defecto 0,06.
+  const c06 = calcRowFor(row({ width: "4,75", gather: "1,5", sheets: 2 }), project());
+  assert.equal(round(c06.panelWidth, 4), round(4.75 / 2 + FIXED_CLOSURE_ADD, 4));
+});
+
 test("calcRow reproduce el caso real del cuadrante (1101: 4,75×2,81, 1,50, 2 hojas)", () => {
   // fabricWidth amplio para que el caso no dispare el warning de ancho de tela.
   const c = calcRowFor(row({ width: "4,75", height: "2,81", gather: "1,50", sheets: 2 }), { ...project(), fabricWidth: 4 });
@@ -81,6 +89,15 @@ test("calcRow avisa si el ancho de corte excede el ancho de tela", () => {
   const c = calcRowFor(row({ width: "3,5", gather: "2,5", sheets: 1 }), project());
   assert.equal(c.ok, false);
   assert.ok(c.issues.some((i) => i.includes("excede el ancho de tela")));
+});
+
+test("calcRow avisa con margen de 10 cm antes del límite del ancho de tela", () => {
+  // cutWidth 2,75 con tela de 2,80: dentro del margen -> aviso sin llegar al límite.
+  const cerca = calcRowFor(row({ width: "2,75", gather: "1", sheets: 1 }), project());
+  assert.ok(cerca.issues.some((i) => i.includes("a menos de 10 cm del ancho de tela")));
+  // cutWidth 2,60: fuera del margen -> sin aviso.
+  const lejos = calcRowFor(row({ width: "2,6", gather: "1", sheets: 1 }), project());
+  assert.ok(!lejos.issues.some((i) => i.includes("ancho de tela")));
 });
 
 test("calcRow avisa con alto de corte fuera de rango", () => {
@@ -121,6 +138,22 @@ test("detectExcelColumns reconoce encabezados españoles con tildes y nº", () =
   assert.equal(d.map.sheets, 5);
   assert.equal(d.map.notes, 6);
   assert.ok(d.matches >= 6);
+});
+
+test("code128Pattern genera Code 128B con Start B, dígito de control y Stop", () => {
+  // "AB": valores 33 y 34; checksum = (104 + 33·1 + 34·2) mod 103 = 102.
+  assert.equal(
+    code128Pattern("AB"),
+    "211214" + "111323" + "131123" + "411131" + "2331112"
+  );
+  // Texto sin caracteres imprimibles no genera código.
+  assert.equal(code128Pattern(""), null);
+  assert.equal(code128Pattern(null), null);
+  // Un código de trazabilidad real: empieza por Start B y termina por Stop.
+  const p = code128Pattern("CC-1A2B3C-1101-H2");
+  assert.ok(p.startsWith("211214"));
+  assert.ok(p.endsWith("2331112"));
+  assert.match(p, /^[1-4]+$/);
 });
 
 test("statusFromValue mapea texto a estado de producción", () => {

@@ -332,16 +332,48 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
 .production-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px}.production-kpi{border:1px solid var(--line);border-radius:11px;padding:12px;background:#fff}.production-kpi span{display:block;color:var(--muted);font-size:10.5px;text-transform:uppercase;font-weight:700}.production-kpi strong{display:block;font-size:23px;margin-top:3px}.production-progress{height:9px;background:var(--line);border-radius:999px;overflow:hidden;margin-top:7px}.production-progress i{display:block;height:100%;background:var(--accent)}
 .production-table .status-select{height:32px;border:1px solid var(--line);border-radius:7px;background:#fff;padding:0 7px}.production-table td{vertical-align:middle}.status-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:800;background:#f2f4f7}.status-pill.measured{background:#eaf2ff;color:#175cd3}.status-pill.cut{background:var(--warn-bg);color:var(--warn-ink)}.status-pill.sewn{background:#f4f0ff;color:#5925dc}.status-pill.installed{background:var(--good-bg);color:var(--good-ink)}
 .cut-controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}.cut-controls select,.cut-controls input{height:35px;border:1px solid var(--line);border-radius:8px;background:#fff;padding:0 9px}.cut-card{position:relative;overflow:hidden}.cut-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--group-color,var(--accent))}
-.label-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.labels-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.fabric-label{border:2px solid var(--steel);border-radius:7px;min-height:155px;padding:12px;background:#fff;display:flex;flex-direction:column;justify-content:space-between;break-inside:avoid}.fabric-label .label-top{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid var(--steel);padding-bottom:6px}.fabric-label .label-hotel{font-weight:900;font-size:13px}.fabric-label .label-code{font-size:12px;font-weight:900}.fabric-label .label-room{font-size:25px;font-weight:950;line-height:1}.fabric-label .label-size{font-size:22px;font-weight:900;text-align:center;margin:8px 0}.fabric-label .label-sheets{display:grid;gap:3px;margin:0 0 8px}.fabric-label .label-sheet-row{display:flex;justify-content:space-between;align-items:center;background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:3px 7px;font-size:11px}.fabric-label .label-sheet-row b{font-weight:900;font-size:12px;font-variant-numeric:tabular-nums}.fabric-label .label-meta{display:grid;grid-template-columns:1fr 1fr;gap:5px;font-size:10px}.fabric-label .label-meta span{border:1px solid var(--line-strong);padding:4px}.fabric-label .label-bottom{display:flex;justify-content:space-between;align-items:center;font-size:10px;margin-top:7px}.fabric-label .label-status{font-weight:800;text-transform:uppercase}
+.label-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}.labels-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.fabric-label{border:1.5px solid #111;border-radius:3px;min-height:148px;padding:8px 10px 7px;background:#fff;display:flex;flex-direction:column;gap:6px;break-inside:avoid}.fabric-label .label-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}.fabric-label .label-hotel{font-weight:900;font-size:12px;text-transform:uppercase;letter-spacing:.02em;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fabric-label .label-code{font-size:10px;font-weight:900;letter-spacing:.04em;white-space:nowrap}.fabric-label .label-room{font-size:20px;font-weight:950;line-height:1.05;letter-spacing:-.01em}.fabric-label .label-size{font-size:16px;font-weight:900;font-variant-numeric:tabular-nums}.fabric-label .label-sheet{font-size:11px;font-weight:850;color:#333;background:#f2f4f7;border:1px solid var(--line);border-radius:4px;padding:3px 7px;align-self:flex-start}.fabric-label .label-meta{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9.5px;color:#444}.fabric-label .label-meta span{border:1px solid var(--line-strong);padding:3px 5px;border-radius:2px}.fabric-label .label-meta b{display:block;font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:#777;margin-bottom:1px}.fabric-label .label-barcode-wrap{margin-top:auto;text-align:center;background:#fff}.fabric-label .label-barcode{display:block;width:100%;height:24px;margin:0 auto}.fabric-label .label-trace{display:block;margin-top:3px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:9px;font-weight:700;letter-spacing:.12em;color:#111}
 .trash-list,.history-list{display:grid;gap:8px}.trash-row,.history-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid var(--line);border-radius:9px;padding:10px}.trash-row p,.history-row p{margin:2px 0 0;color:var(--muted);font-size:11px}.history-row.current{border-color:var(--accent)}.history-actions{display:flex;gap:5px}
 .offline-note{border:1px solid #ffd48a;background:var(--warn-bg);color:var(--warn-ink);border-radius:8px;padding:8px 10px;font-size:11px;margin-top:8px;display:none}.offline-note.show{display:block}
 .mobile-only{display:none}
 @media(max-width:1100px){.xlsx-layout{grid-template-columns:1fr}.production-kpis{grid-template-columns:repeat(3,1fr)}.labels-grid{grid-template-columns:repeat(2,1fr)}.import-choice-grid{grid-template-columns:1fr}}
 @media(max-width:700px){.template-grid,.export-grid,.mapping-grid{grid-template-columns:1fr}.production-kpis{grid-template-columns:repeat(2,1fr)}.labels-grid{grid-template-columns:1fr}.quick-tools{border:0}.mobile-only{display:inline-flex}}
 @media print{
-  .labels-grid{grid-template-columns:repeat(3,1fr);gap:6mm}.fabric-label{min-height:54mm;border-radius:0;padding:4mm}.fabric-label .label-room{font-size:22pt}.fabric-label .label-size{font-size:17pt}
+  .labels-grid{grid-template-columns:repeat(3,1fr);gap:6mm}.fabric-label{min-height:46mm;border-radius:0;padding:3mm 4mm}.fabric-label .label-room{font-size:20pt}.fabric-label .label-size{font-size:15pt}.fabric-label .label-barcode{height:11mm}.fabric-label .label-trace{font-size:9pt}
   #view-etiquetas.printing .page-head,#view-etiquetas.printing .label-toolbar{display:none!important}
   #view-produccion.printing .page-head,#view-produccion.printing .production-filters{display:none!important}
+}
+/* Impresora de etiquetas (Zebra y similares): una etiqueta por página con el tamaño
+   elegido en el toolbar. El controlador ZDesigner debe estar configurado igual. */
+@page zebra-40x60{size:40mm 60mm;margin:0}
+@page zebra-40x50{size:40mm 50mm;margin:0}
+@page zebra-40x80{size:40mm 80mm;margin:0}
+@page zebra-50x60{size:50mm 60mm;margin:0}
+@page zebra-60x60{size:60mm 60mm;margin:0}
+@media print{
+  body.zebra-print #view-etiquetas.printing .labels-grid{grid-template-columns:1fr;gap:0}
+  body.zebra-print #view-etiquetas.printing .fabric-label{min-height:0;margin:0;padding:3mm 4mm;border:0;border-radius:0;gap:1.5mm;page-break-after:always}
+  body.zebra-40x60 #view-etiquetas.printing .fabric-label{page:zebra-40x60;width:40mm;height:60mm}
+  body.zebra-40x50 #view-etiquetas.printing .fabric-label{page:zebra-40x50;width:40mm;height:50mm}
+  body.zebra-40x80 #view-etiquetas.printing .fabric-label{page:zebra-40x80;width:40mm;height:80mm}
+  body.zebra-50x60 #view-etiquetas.printing .fabric-label{page:zebra-50x60;width:50mm;height:60mm}
+  body.zebra-60x60 #view-etiquetas.printing .fabric-label{page:zebra-60x60;width:60mm;height:60mm}
+  body.zebra-print #view-etiquetas.printing .fabric-label:last-child{page-break-after:auto}
+  body.zebra-print #view-etiquetas.printing .fabric-label .label-hotel{font-size:8pt}
+  body.zebra-print #view-etiquetas.printing .fabric-label .label-code{font-size:7pt}
+  body.zebra-print #view-etiquetas.printing .fabric-label .label-room{font-size:14pt}
+  body.zebra-print #view-etiquetas.printing .fabric-label .label-size{font-size:11pt}
+  body.zebra-print #view-etiquetas.printing .fabric-label .label-sheet{font-size:7pt;padding:1.5px 5px}
+  body.zebra-print #view-etiquetas.printing .fabric-label .label-meta{font-size:6.5pt;gap:1.5mm}
+  body.zebra-print #view-etiquetas.printing .fabric-label .label-meta b{font-size:6pt}
+  body.zebra-print #view-etiquetas.printing .fabric-label .label-barcode{height:9mm}
+  body.zebra-print #view-etiquetas.printing .fabric-label .label-trace{font-size:6.5pt}
+  /* Etiqueta corta 40×50: tipografía y barras más compactas para que quepa. */
+  body.zebra-40x50 #view-etiquetas.printing .fabric-label .label-room{font-size:12pt}
+  body.zebra-40x50 #view-etiquetas.printing .fabric-label .label-size{font-size:10pt}
+  body.zebra-40x50 #view-etiquetas.printing .fabric-label .label-meta{font-size:6pt;gap:1mm}
+  body.zebra-40x50 #view-etiquetas.printing .fabric-label .label-barcode{height:7mm}
+  body.zebra-40x50 #view-etiquetas.printing .fabric-label .label-trace{font-size:6pt}
 }
 
 /* === Utilidades globales (v2.1) === */
@@ -510,7 +542,7 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
         <div class="page-head"><div><h1>Hojas de confección</h1><p>Se generan en grupos de seis habitaciones, como las plantillas originales.</p></div><div class="page-actions"><button class="btn primary" data-print="confeccion">Imprimir hojas</button></div></div>
         <div class="card no-print"><div class="card-body"><div class="grid cols-4">
           <label class="field"><span>Descuento de altura (m)</span><input id="p-heightDiscount" type="number" step="0.01"></label>
-          <div class="field"><span>Añadido para cierre (m)</span><strong class="field-readonly" title="Valor fijo del taller">0,06 m</strong></div>
+          <label class="field"><span>Añadido para cierre (m)</span><select id="p-closureAdd"><option value="0.06">0,06 m</option><option value="0.15">0,15 m</option></select></label>
           <label class="field"><span>Garfios</span><input id="p-hooks"></label>
           <label class="field"><span>Filtrar habitación</span><input id="confectionSearch" placeholder="Todas"></label>
         </div></div></div>
@@ -573,8 +605,8 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
       </section>
 
       <section class="view" id="view-etiquetas">
-        <div class="page-head"><div><h1>Etiquetas de paños</h1><p>Una etiqueta por hoja con habitación, corte, medida y lado.</p></div><div class="page-actions"><button class="btn primary" id="printLabelsBtn">Imprimir etiquetas</button></div></div>
-        <div class="label-toolbar no-print"><input class="search" id="labelSearch" placeholder="Buscar habitación"><select id="labelStatusFilter"><option value="all">Todos los estados</option><option value="">Sin estado</option><option value="measured">Medida revisada</option><option value="cut">Cortada</option><option value="sewn">Confeccionada</option><option value="installed">Instalada</option></select><strong id="labelCount">0 etiquetas</strong></div>
+        <div class="page-head"><div><h1>Etiquetas de paños</h1><p>Una etiqueta por hoja para coser en el tejido, con código de barras de trazabilidad.</p></div><div class="page-actions"><button class="btn" id="printLabelsZebraBtn" title="Imprime una etiqueta por página a 40×60 mm para impresora de etiquetas (Zebra)">Imprimir 40 mm</button><button class="btn primary" id="printLabelsBtn">Imprimir etiquetas (A4)</button></div></div>
+        <div class="label-toolbar no-print"><input class="search" id="labelSearch" placeholder="Buscar habitación"><select id="labelStatusFilter"><option value="all">Todos los estados</option><option value="">Sin estado</option><option value="measured">Medida revisada</option><option value="cut">Cortada</option><option value="sewn">Confeccionada</option><option value="installed">Instalada</option></select><select id="zebraLabelSize" title="Tamaño de etiqueta para la impresora Zebra (debe coincidir con el controlador ZDesigner)"><option value="40x60">Etiqueta Zebra 40 × 60 mm</option><option value="40x50">Etiqueta Zebra 40 × 50 mm</option><option value="40x80">Etiqueta Zebra 40 × 80 mm</option><option value="50x60">Etiqueta Zebra 50 × 60 mm</option><option value="60x60">Etiqueta Zebra 60 × 60 mm</option></select><strong id="labelCount">0 etiquetas</strong></div>
         <div class="labels-grid" id="labelsGrid"></div>
       </section>
 
@@ -998,7 +1030,7 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
       if(room&&duplicateRooms.has(room))issues.push({level:'error',text:'Habitación duplicada'});
       if(c.width<=0)issues.push({level:'error',text:'Falta el ancho'});else if(c.width>10)issues.push({level:'warning',text:'Ancho superior a 10 m'});
       if(c.height<=0)issues.push({level:'error',text:'Falta la altura'});else if(c.height>6)issues.push({level:'warning',text:'Altura superior a 6 m'});
-      if(fabricWidth>0&&c.cutWidth>0&&c.cutWidth>fabricWidth)issues.push({level:'warning',text:`Ancho de corte ${fmt(c.cutWidth)} m excede el ancho de tela (${fmt(fabricWidth)} m)`});
+      if(fabricWidth>0&&c.cutWidth>0&&c.cutWidth>fabricWidth-0.1)issues.push({level:'warning',text:c.cutWidth>fabricWidth?`Ancho de corte ${fmt(c.cutWidth)} m excede el ancho de tela (${fmt(fabricWidth)} m)`:`Ancho de corte ${fmt(c.cutWidth)} m a menos de 10 cm del ancho de tela (${fmt(fabricWidth)} m)`});
       if(fabricWidth>0&&c.cutHeight>0&&c.cutHeight>fabricWidth)issues.push({level:'warning',text:`Alto de corte ${fmt(c.cutHeight)} m no cabe en el ancho de tela (${fmt(fabricWidth)} m)`});
       if(c.gather<1||c.gather>3)issues.push({level:'warning',text:'Fruncido fuera de 1,00–3,00'});
       if(c.sheets<1||c.sheets>10||!Number.isInteger(c.sheets))issues.push({level:'error',text:'Número de hojas incorrecto'});
@@ -1010,9 +1042,9 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
   }
 
   const PROJECT_INPUTS={
-    'p-date':'date','p-hotel':'hotel','p-client':'client','p-seamstress':'seamstress','p-fabricType':'fabricType','p-fabricName':'fabricName','p-fabricWidth':'fabricWidth','p-confectionType':'confectionType','p-hooks':'hooks','p-heightDiscount':'heightDiscount','p-railDeduction':'railDeduction','p-waste':'waste','p-ordered':'ordered','d-priceConfection':'priceConfection','d-priceFabric':'priceFabric','d-priceInstallation':'priceInstallation','d-gather':'gather','d-hem':'hem','d-margin':'margin'
+    'p-date':'date','p-hotel':'hotel','p-client':'client','p-seamstress':'seamstress','p-fabricType':'fabricType','p-fabricName':'fabricName','p-fabricWidth':'fabricWidth','p-confectionType':'confectionType','p-closureAdd':'closureAdd','p-hooks':'hooks','p-heightDiscount':'heightDiscount','p-railDeduction':'railDeduction','p-waste':'waste','p-ordered':'ordered','d-priceConfection':'priceConfection','d-priceFabric':'priceFabric','d-priceInstallation':'priceInstallation','d-gather':'gather','d-hem':'hem','d-margin':'margin'
   };
-  // FIXED_CLOSURE_ADD (0,06 m) vive en /static/logic.js.
+  // Añadido de cierre configurable (0,06 u 0,15 m) en la vista de confección; FIXED_CLOSURE_ADD (0,06 m) es el valor por defecto en /static/logic.js.
   const EDITABLE_KEYS=['room','width','height','gather','hem','sheets','notes'];
   const NUMERIC_KEYS=new Set(['width','height','gather','hem','sheets']);
 
@@ -1021,7 +1053,7 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
       const el=q('#'+id);if(!el)continue;
       el.dataset.project=key;
       el.addEventListener('input',()=>{
-        state.project[key]=el.type==='number'?num(el.value):el.value;
+        state.project[key]=el.type==='number'||el.tagName==='SELECT'?num(el.value):el.value;
         save();renderDependent(false);
       });
       el.addEventListener('blur',()=>finishEdit(`Cambiar ${el.closest('label')?.querySelector('span')?.textContent||key}`));
@@ -1177,7 +1209,7 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
       }).join('');
       const fillers=Array.from({length:Math.max(0,8-chunk.length)},()=>'<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="checkbox-cell"></td></tr>').join('');
       const totalLabel=sourceRows.reduce((a,x)=>a+calcRow(x).meters,0);
-      return `<article class="paper confection-page">${paperHeader()}<div class="paper-sub"><span><b>Descuento altura:</b> ${fmt(state.project.heightDiscount)} m</span><span><b>Confección:</b> ${esc(state.project.confectionType)}</span><span><b>Garfios:</b> ${esc(state.project.hooks)}</span><span><b>Añadido cierre:</b> ${fmt(FIXED_CLOSURE_ADD)} m (fijo)</span></div><table class="paper-table confection-table"><thead><tr><th>Nº Hab.</th><th>Ancho 1</th><th>Ancho 2</th><th>Alto corte</th><th>Fruncido</th><th>Hojas</th><th>Tela</th><th>m/hoja</th><th>Suma m</th><th>✓</th></tr></thead><tbody>${lines}${fillers}<tr class="paper-total"><td colspan="8" style="text-align:right">TOTAL m (esta página)</td><td>${fmt(total)}</td><td></td></tr><tr class="paper-grand-total"><td colspan="8" style="text-align:right">TOTAL GENERAL</td><td>${fmt(totalLabel)}</td><td></td></tr></tbody></table><div class="paper-footer"><div class="paper-line"><b>Cliente:</b>${esc(state.project.client)}</div><div class="paper-line"><b>Fecha:</b>${esc(formatDate(state.project.date))}</div><div class="paper-line"><b>Costurera:</b>${esc(state.project.seamstress)}</div><div class="paper-line"><b>Firma operario:</b></div></div><div class="paper-meta"><div><b>Confección</b><br>${esc(state.project.confectionType)}</div><div><b>Garfios</b><br>${esc(state.project.hooks)}</div><div><b>Tela</b><br>${esc(state.project.fabricName)} · ${fmt(totalLabel)} m</div></div><div style="text-align:right;margin-top:8px;font-size:8pt;color:#555">Página ${idx+1} de ${chunks.length}</div></article>`;
+      return `<article class="paper confection-page">${paperHeader()}<div class="paper-sub"><span><b>Descuento altura:</b> ${fmt(state.project.heightDiscount)} m</span><span><b>Confección:</b> ${esc(state.project.confectionType)}</span><span><b>Garfios:</b> ${esc(state.project.hooks)}</span><span><b>Añadido cierre:</b> ${fmt(num(state.project.closureAdd)||FIXED_CLOSURE_ADD)} m</span></div><table class="paper-table confection-table"><thead><tr><th>Nº Hab.</th><th>Ancho 1</th><th>Ancho 2</th><th>Alto corte</th><th>Fruncido</th><th>Hojas</th><th>Tela</th><th>m/hoja</th><th>Suma m</th><th>✓</th></tr></thead><tbody>${lines}${fillers}<tr class="paper-total"><td colspan="8" style="text-align:right">TOTAL m (esta página)</td><td>${fmt(total)}</td><td></td></tr><tr class="paper-grand-total"><td colspan="8" style="text-align:right">TOTAL GENERAL</td><td>${fmt(totalLabel)}</td><td></td></tr></tbody></table><div class="paper-footer"><div class="paper-line"><b>Cliente:</b>${esc(state.project.client)}</div><div class="paper-line"><b>Fecha:</b>${esc(formatDate(state.project.date))}</div><div class="paper-line"><b>Costurera:</b>${esc(state.project.seamstress)}</div><div class="paper-line"><b>Firma operario:</b></div></div><div class="paper-meta"><div><b>Confección</b><br>${esc(state.project.confectionType)}</div><div><b>Garfios</b><br>${esc(state.project.hooks)}</div><div><b>Tela</b><br>${esc(state.project.fabricName)} · ${fmt(totalLabel)} m</div></div><div style="text-align:right;margin-top:8px;font-size:8pt;color:#555">Página ${idx+1} de ${chunks.length}</div></article>`;
     }).join('');
   }
 
@@ -1323,24 +1355,45 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
     if(q('#productionStatusFilter'))q('#productionStatusFilter').value=state.productionFilter||'all';
   }
 
+  // Trazabilidad: código estable por trabajo + habitación + hoja para coser en el paño.
+  const traceCode=(room,sheet)=>{
+    const job=(state.jobId||'').replace(/[^a-zA-Z0-9]/g,'').slice(0,6).toUpperCase()||'000000';
+    const r=String(room??'').toUpperCase().replace(/[^A-Z0-9]/g,'')||'XXX';
+    return `CC-${job}-${r}-H${sheet}`;
+  };
+  // Renderiza el patrón Code 128 como SVG en blanco y negro (barra = módulo impar).
+  const barcodeSvg=(pattern,height)=>{
+    const qz=10;let x=qz;let bars='';
+    for(let i=0;i<pattern.length;i++){
+      const w=Number(pattern[i]);
+      if(i%2===0)bars+=`<rect x="${x}" y="0" width="${w}" height="${height}"/>`;
+      x+=w;
+    }
+    const width=x+qz;
+    return `<svg class="label-barcode" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" preserveAspectRatio="none" role="img" aria-label="Código de barras de trazabilidad">${bars}</svg>`;
+  };
+
   function renderLabels(){
     const filter=q('#labelStatusFilter')?.value||state.labelFilter||'all';state.labelFilter=filter;
     const search=(q('#labelSearch')?.value||'').trim().toLowerCase();
     const rows=readyRows().filter(r=>(filter==='all'||(r.status||'')===filter)&&(!search||String(r.room).toLowerCase().includes(search)));
     const allGroups=allGroupedCuts();
-    // Una etiqueta por habitación/cortina, con todos los paños listados dentro.
-    const labels=rows.map(r=>{
+    // Una etiqueta por hoja (paño) para coserla en el tejido, con código de barras de trazabilidad.
+    const labels=rows.flatMap(r=>{
       const c=calcRow(r),groupIndex=allGroups.findIndex(g=>g.key===cutKey(c))+1;
-      const sides=Array.from({length:c.sheets},(_,i)=>c.sheets===1?'HOJA ÚNICA':i===0?'IZQ':i===1?'DER':`HOJA ${i+1}`).join(' · ');
-      const sheetRows=Array.from({length:c.sheets},(_,i)=>{
-        const side=c.sheets===1?'ÚNICA':i===0?'IZQ':i===1?'DER':`${i+1}`;
-        return `<div class="label-sheet-row"><span>${side}</span><b>${fmt(c.cutWidth)} × ${fmt(c.cutHeight)} m</b></div>`;
-      }).join('');
-      return `<article class="fabric-label"><div class="label-top"><span class="label-hotel">${esc(state.project.hotel||'OBRA')}</span><span class="label-code">CORTE C-${String(groupIndex).padStart(2,'0')}</span></div><div><div class="label-room">HAB. ${esc(r.room)}</div><div class="label-size">${fmt(c.cutWidth)} × ${fmt(c.cutHeight)} m</div><div class="label-sheets">${sheetRows}</div><div class="label-meta"><span><b>Hueco</b><br>${fmt(c.width)} × ${fmt(c.height)} m</span><span><b>Paños</b><br>${c.sheets} · ${sides}</span><span><b>Tela</b><br>${esc(state.project.fabricName||state.project.fabricType)}</span><span><b>Fruncido</b><br>${fmt(c.gather)}</span></div></div><div class="label-bottom"><span>${formatDate(state.project.date)}</span></div></article>`;
+      return Array.from({length:c.sheets},(_,i)=>{
+        const sheet=i+1;
+        const side=c.sheets===1?'ÚNICA':i===0?'IZQ':i===1?'DER':`HOJA ${sheet}`;
+        const code=traceCode(r.room,sheet);
+        const pattern=code128Pattern(code);
+        const barcode=pattern?barcodeSvg(pattern,28):'';
+        return `<article class="fabric-label"><div class="label-top"><span class="label-hotel">${esc(state.project.hotel||'OBRA')}</span><span class="label-code">CORTE C-${String(groupIndex).padStart(2,'0')}</span></div><div class="label-room">HAB. ${esc(r.room)}</div><div class="label-size">${fmt(c.cutWidth)} × ${fmt(c.cutHeight)} m</div><div class="label-sheet">HOJA ${sheet}/${c.sheets} · ${side}</div><div class="label-meta"><span><b>Hueco</b><br>${fmt(c.width)} × ${fmt(c.height)} m</span><span><b>Fruncido</b><br>${fmt(c.gather)}</span><span><b>Tela</b><br>${esc(state.project.fabricName||state.project.fabricType)}</span><span><b>Fecha</b><br>${formatDate(state.project.date)}</span></div><div class="label-barcode-wrap">${barcode}<span class="label-trace">${esc(code)}</span></div></article>`;
+      });
     });
-    q('#labelsGrid').innerHTML=labels.length?labels.join(''):emptyState({icon:'▣',title:'Sin etiquetas',text:readyRows().length?'Ninguna etiqueta coincide con el filtro actual.':'Las etiquetas se generan a partir de la relación de huecos: una por habitación con medida de corte, paños y lado.',actions:readyRows().length?[]:[{label:'Ir a Datos y huecos',gotoView:'relacion',primary:true}]});
+    q('#labelsGrid').innerHTML=labels.length?labels.join(''):emptyState({icon:'▣',title:'Sin etiquetas',text:readyRows().length?'Ninguna etiqueta coincide con el filtro actual.':'Las etiquetas se generan a partir de la relación de huecos: una por hoja (paño) con código de barras de trazabilidad para coser en el tejido.',actions:readyRows().length?[]:[{label:'Ir a Datos y huecos',gotoView:'relacion',primary:true}]});
     q('#labelCount').textContent=`${labels.length} etiqueta${labels.length===1?'':'s'}`;
     if(q('#labelStatusFilter'))q('#labelStatusFilter').value=state.labelFilter||'all';
+    if(q('#zebraLabelSize'))q('#zebraLabelSize').value=state.zebraLabelSize||'40x60';
   }
 
   function renderJobs(){
@@ -1819,6 +1872,22 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
       if(cover&&cover.parentNode)cover.parentNode.removeChild(cover);
     },500);
   }
+  // Impresión a impresora de etiquetas (Zebra y similares): una etiqueta por página,
+  // tamaño exacto de etiqueta (40×60 mm) definido por @page zebra-label.
+  function printLabelsZebra(){
+    const view=q('#view-etiquetas');if(!view)return;
+    qa('.view').forEach(v=>v.classList.remove('printing'));
+    view.classList.add('printing');
+    // Tamaño elegido en el toolbar: define la página y las medidas de la etiqueta en impresión.
+    const size=String(q('#zebraLabelSize')?.value||'40x60').toLowerCase().replace(/[^a-z0-9]/g,'');
+    document.body.classList.remove('zebra-40x60','zebra-40x50','zebra-40x80','zebra-50x60','zebra-60x60');
+    document.body.classList.add('zebra-print','zebra-'+size);
+    window.print();
+    setTimeout(()=>{
+      document.body.classList.remove('zebra-print','zebra-'+size);
+      view.classList.remove('printing');
+    },500);
+  }
   function setWorkflowActive(step){state.activeStep=Number(step)||1;qa('[data-workflow-step]').forEach(b=>b.classList.toggle('active',Number(b.dataset.workflowStep)===state.activeStep))}
   function goToStep(step){step=Number(step);setWorkflowActive(step);if(step===1||step===2){switchView('relacion');setTimeout(()=>{const target=step===1?q('[data-step-anchor="1"]'):q('[data-step-anchor="2"]');target?.scrollIntoView({behavior:'smooth',block:'start'})},80)}else if(step===3)switchView('resumen');else switchView('confeccion');save()}
   function switchView(name,saveIt=true){state.activeView=name;qa('.view').forEach(v=>v.classList.toggle('active',v.id==='view-'+name));qa('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===name));if(name==='resumen'||name==='corte'||name==='revisar'||name==='produccion'||name==='etiquetas')setWorkflowActive(3);else if(name==='confeccion')setWorkflowActive(4);else if(name==='relacion'&&![1,2].includes(Number(state.activeStep)))setWorkflowActive(2);if(dirtyViews.has(name))renderDependent(name==='relacion');if(saveIt)save();window.scrollTo({top:0,behavior:'smooth'})}
@@ -1990,6 +2059,7 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
       if(e.target.matches('[data-production-status]')){checkpoint('Cambiar estado de producción');const r=state.rows.find(x=>x.id===e.target.dataset.productionStatus);if(r)r.status=e.target.value;save();renderAll();return}
       if(e.target.id==='productionStatusFilter'){state.productionFilter=e.target.value;renderProduction();return}
       if(e.target.id==='labelStatusFilter'){state.labelFilter=e.target.value;renderLabels();return}
+      if(e.target.id==='zebraLabelSize'){state.zebraLabelSize=e.target.value;renderLabels();return}
     });
 
     document.addEventListener('click',e=>{
@@ -2011,6 +2081,7 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
 
     q('#resetChecksBtn').addEventListener('click',()=>{checkpoint('Reiniciar check list');state.checks={};save();renderChecklist()});
     q('#printLabelsBtn')?.addEventListener('click',()=>printView('etiquetas'));
+    q('#printLabelsZebraBtn')?.addEventListener('click',()=>printLabelsZebra());
     // Escape cierra modales abiertos y menús desplegables (askModal gestiona el suyo en captura).
     document.addEventListener('keydown',e=>{
       if(e.key!=='Escape')return;

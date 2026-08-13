@@ -2,6 +2,35 @@
 
 Fecha de cierre técnico: 29 de julio de 2026.
 
+## Modo de impresión a etiqueta Zebra con tamaños configurables (13 de agosto de 2026)
+
+- Nuevo botón «Imprimir 40 mm» en la vista de etiquetas: imprime una etiqueta por página al tamaño exacto de etiqueta, sin portada ni márgenes, pensado para impresoras de etiquetas con controlador ZDesigner (Zebra ZT231 y similares).
+- **Selector de tamaño de etiqueta** en el toolbar: 40×60 (por defecto), 40×50, 40×80, 50×60 y 60×60 mm. Cada tamaño usa su `@page` nombrada (`zebra-40x60`, `zebra-40x50`, …), con ajuste de tipografía para la etiqueta corta de 40×50. La elección se recuerda con el trabajo.
+- La impresión A4 de etiquetas sigue disponible como antes («Imprimir etiquetas (A4)»).
+- Tests estáticos del modo Zebra (botón, páginas nombradas, una etiqueta por página y selector de tamaños).
+
+## Etiquetas de paños para coser con código de barras de trazabilidad (13 de agosto de 2026)
+
+- Formato de etiqueta rediseñado por completo: ahora se genera **una etiqueta por hoja (paño)** — no una por habitación — para coserla en el tejido.
+- Cada etiqueta incluye un **código de barras Code 128B** con el código de trazabilidad `CC-<trabajo>-<habitación>-H<hoja>` (6 primeros caracteres del id del trabajo + habitación normalizada + número de hoja), con el texto del código debajo por si no hay lector.
+- El generador de barras es propio (`code128Pattern` en `logic.js`, sin dependencias ni CDN — la app es offline): patrón estándar Code 128B con dígito de control y zona de silencio, renderizado como SVG nítido para impresión.
+- La etiqueta muestra obra, número de corte, habitación, medida de corte (ancho × alto), hoja x/y con lado (ÚNICA/IZQ/DER), hueco, fruncido, tela y fecha.
+- Estilo de etiqueta cosida: borde negro, compacto, código de barras a lo ancho y tipografía monoespaciada; reglas de impresión ajustadas (3 columnas, alto ~46 mm).
+- Tests: patrón Code 128B con checksum verificado para «AB», código real de trazabilidad, y comprobación estática de la etiqueta con barras.
+
+## Añadido de cierre configurable: desplegable 0,06 m / 0,15 m (13 de agosto de 2026)
+
+- El campo «Añadido para cierre (m)» de la vista de confección pasa de valor fijo a un desplegable con 0,06 m y 0,15 m, enlazado a `state.project.closureAdd` (mismo mecanismo que el resto de campos del proyecto).
+- El cálculo del panel (`panelWidth`) usa ahora el valor elegido y cae a 0,06 m por defecto si no hay valor (proyectos antiguos).
+- La hoja impresa de confección muestra el añadido elegido en lugar del «0,06 m (fijo)».
+- Tests: cálculo con 0,06/0,15 y sin valor, y comprobación estática del desplegable y su enlace.
+
+## Margen de 10 cm en el aviso de ancho de tela (13 de agosto de 2026)
+
+- El aviso de ancho de corte ahora salta con un margen de seguridad de 10 cm antes del límite: si el ancho de corte queda a menos de 10 cm del ancho de la tela (o lo supera), se marca la fila y salta la alerta.
+- Mensaje diferenciado: «Ancho de corte X m a menos de 10 cm del ancho de tela (Y m)» cuando se acerca, y «Ancho de corte X m excede el ancho de tela (Y m)» cuando lo supera.
+- Aplicado en `calcRowFor` (lógica pura) y en `validateAll` (revisión visual); la alerta emergente sigue cubriendo ambos casos. Test nuevo del margen en `logic.test.mjs`.
+
 ## Acceso con correo completo como usuario (11 de agosto de 2026)
 
 - El nombre de usuario acepta ahora el correo completo (con `@`): `UserCreate` admite `[a-z0-9._@-]` en lugar de prohibir la `@`, manteniendo el resto de validación (3-80 caracteres, normalización a minúsculas).
