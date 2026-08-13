@@ -35,7 +35,7 @@ def main() -> int:
         with socket.create_connection((ip, 9100), timeout=10) as sock:
             sock.sendall(data)
     except OSError as exc:
-        print(f"No se pudo conectar con {ip}:9100 — revisa la IP y que la impresora esté en red: {exc}")
+        print(f"No se pudo conectar con {ip}:9100 — revisa la IP de la impresora: {exc}")
         return 1
     print(f"Enviados {len(data)} bytes a {ip}:9100")
     return 0

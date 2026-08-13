@@ -606,7 +606,7 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
 
       <section class="view" id="view-etiquetas">
         <div class="page-head"><div><h1>Etiquetas de paños</h1><p>Una etiqueta por hoja para coser en el tejido, con código de barras de trazabilidad.</p></div><div class="page-actions"><button class="btn" id="printLabelsZebraBtn" title="Imprime una etiqueta por página a 40×60 mm para impresora de etiquetas (Zebra)">Imprimir 40 mm</button><button class="btn primary" id="printLabelsBtn">Imprimir etiquetas (A4)</button></div></div>
-        <div class="label-toolbar no-print"><input class="search" id="labelSearch" placeholder="Buscar habitación"><select id="labelStatusFilter"><option value="all">Todos los estados</option><option value="">Sin estado</option><option value="measured">Medida revisada</option><option value="cut">Cortada</option><option value="sewn">Confeccionada</option><option value="installed">Instalada</option></select><select id="zebraLabelSize" title="Tamaño de etiqueta para la impresora Zebra (debe coincidir con el controlador ZDesigner)"><option value="40x60">Etiqueta Zebra 40 × 60 mm</option><option value="40x50">Etiqueta Zebra 40 × 50 mm</option><option value="40x80">Etiqueta Zebra 40 × 80 mm</option><option value="50x60">Etiqueta Zebra 50 × 60 mm</option><option value="60x60">Etiqueta Zebra 60 × 60 mm</option></select><button class="btn" id="zplBtn" title="Genera el código ZPL (formato nativo de impresora de etiquetas Zebra) con el código de barras, listo para enviar a la impresora">ZPL Zebra</button><strong id="labelCount">0 etiquetas</strong></div>
+        <div class="label-toolbar no-print"><input class="search" id="labelSearch" placeholder="Buscar habitación"><select id="labelStatusFilter"><option value="all">Todos los estados</option><option value="">Sin estado</option><option value="measured">Medida revisada</option><option value="cut">Cortada</option><option value="sewn">Confeccionada</option><option value="installed">Instalada</option></select><select id="zebraLabelSize" title="Tamaño de etiqueta para la impresora Zebra (debe coincidir con el controlador ZDesigner)"><option value="40x60">Etiqueta Zebra 40 × 60 mm</option><option value="40x50">Etiqueta Zebra 40 × 50 mm</option><option value="40x80">Etiqueta Zebra 40 × 80 mm</option><option value="50x60">Etiqueta Zebra 50 × 60 mm</option><option value="60x60">Etiqueta Zebra 60 × 60 mm</option></select><button class="btn primary" id="sendZebraBtn" title="Envía el ZPL directamente a la impresora Zebra por red (requiere el agente local corriendo en el PC del taller: python scripts/zebra_agent.py <IP>)">Enviar a Zebra</button><button class="btn" id="zplBtn" title="Genera el código ZPL (formato nativo de impresora de etiquetas Zebra) con el código de barras, listo para copiar o descargar">ZPL Zebra</button><strong id="labelCount">0 etiquetas</strong></div>
         <div class="labels-grid" id="labelsGrid"></div>
       </section>
 
@@ -795,7 +795,7 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
 <div class="modal-backdrop" id="historyModal"><div class="modal" role="dialog" aria-modal="true"><div class="modal-head"><h3>Historial y versiones</h3><button class="btn icon" data-close="historyModal">×</button></div><div class="modal-body"><div class="modal-toolbar"><span>Guarde puntos de restauración antes de cambios importantes.</span><button class="btn primary" id="saveVersionBtn">Guardar versión ahora</button></div><div class="history-list" id="historyList"></div><div class="central-history-block"><h4>Historial central del servidor</h4><div id="centralHistoryList" class="central-history-list"><div class="empty">Cargando historial…</div></div></div></div><div class="modal-foot"><button class="btn" data-close="historyModal">Cerrar</button></div></div></div>
 <div class="modal-backdrop" id="zplModal"><div class="modal" role="dialog" aria-modal="true" style="max-width:660px">
   <div class="modal-head"><h3>Código ZPL para Zebra</h3><button class="btn icon" data-close="zplModal" aria-label="Cerrar">×</button></div>
-  <div class="modal-body"><div class="note"><b>Formato nativo de impresora de etiquetas (ZPL).</b> El tamaño de etiqueta es el elegido en el toolbar (arriba). Para imprimir: descarga el archivo y envíalo a la Zebra por red con <code>python scripts/send_zpl.py &lt;IP_de_la_Zebra&gt; etiquetas.prn</code> (puerto 9100), o imprime el archivo desde Windows con la Zebra instalada (controlador ZDesigner).</div><textarea id="zplOutput" readonly spellcheck="false" aria-label="Código ZPL generado" style="width:100%;height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;white-space:pre;border:1px solid var(--line);border-radius:8px;padding:10px;background:#fafbfc;color:#111;box-sizing:border-box"></textarea></div>
+  <div class="modal-body"><div class="note"><b>Formato nativo de impresora de etiquetas (ZPL).</b> El tamaño de etiqueta es el elegido en el toolbar (arriba). La forma más directa es el botón «Enviar a Zebra» (requiere el agente local <code>scripts/zebra_agent.py &lt;IP&gt;</code> corriendo en el PC del taller). Alternativas: descarga el archivo y envíalo con <code>python scripts/send_zpl.py &lt;IP&gt; etiquetas.prn</code> (puerto 9100), o imprime el archivo desde Windows con la Zebra instalada (ZDesigner).</div><textarea id="zplOutput" readonly spellcheck="false" aria-label="Código ZPL generado" style="width:100%;height:320px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;white-space:pre;border:1px solid var(--line);border-radius:8px;padding:10px;background:#fafbfc;color:#111;box-sizing:border-box"></textarea></div>
   <div class="modal-foot"><button class="btn" id="zplCopyBtn">Copiar</button><button class="btn" id="zplDownloadBtn">Descargar .prn</button><button class="btn primary" data-close="zplModal">Cerrar</button></div>
 </div></div>
 
@@ -1418,13 +1418,29 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
   }
 
   // Código ZPL (formato nativo de impresora de etiquetas Zebra) de las etiquetas filtradas.
-  function showZpl(){
+  function buildZpl(){
     const items=currentLabels();
     const size=String(q('#zebraLabelSize')?.value||'40x60').split('x');
     const w=parseInt(size[0],10)||40,h=parseInt(size[1],10)||60;
-    const zpl=items.map(l=>zebraZpl(l,w,h)).join('\n\n');
+    return {zpl:items.map(l=>zebraZpl(l,w,h)).join('\n\n'),count:items.length};
+  }
+  function showZpl(){
+    const {zpl}=buildZpl();
     q('#zplOutput').value=zpl||'; Sin etiquetas para este filtro';
     openModal('zplModal');
+  }
+  // Envío directo a la impresora: el agente local (scripts/zebra_agent.py) recibe
+  // el ZPL por HTTP en 127.0.0.1:8765 y lo reenvía a la Zebra por el puerto 9100.
+  async function sendToZebra(){
+    const {zpl,count}=buildZpl();
+    if(!count){toast('No hay etiquetas para este filtro');return}
+    try{
+      const res=await fetch('http://127.0.0.1:8765/',{method:'POST',headers:{'Content-Type':'text/plain'},body:zpl});
+      if(!res.ok)throw new Error('HTTP '+res.status);
+      toast(`Enviado a la Zebra: ${count} etiqueta${count===1?'':'s'}`);
+    }catch{
+      toast('No se pudo enviar a la Zebra: arranca scripts/zebra_agent.py <IP> en el PC del taller y comprueba la IP de la impresora (o usa ZPL Zebra → Descargar .prn)');
+    }
   }
 
   function renderJobs(){
@@ -2114,6 +2130,7 @@ button.validation-chip{cursor:pointer;transition:background .12s}button.validati
     q('#printLabelsBtn')?.addEventListener('click',()=>printView('etiquetas'));
     q('#printLabelsZebraBtn')?.addEventListener('click',()=>printLabelsZebra());
     q('#zplBtn')?.addEventListener('click',()=>showZpl());
+    q('#sendZebraBtn')?.addEventListener('click',()=>sendToZebra());
     q('#zplCopyBtn')?.addEventListener('click',async()=>{
       const v=q('#zplOutput')?.value||'';if(!v){toast('No hay código ZPL que copiar');return}
       try{await navigator.clipboard.writeText(v);toast('ZPL copiado al portapapeles')}

@@ -75,6 +75,13 @@ test("las etiquetas se generan también en ZPL nativo (formato Zebra)", () => {
   assert.match(index, /Descargar \.prn/);
 });
 
+test("hay envío directo a la Zebra mediante agente local (un clic)", () => {
+  assert.match(index, /id="sendZebraBtn"/);
+  assert.match(index, /sendToZebra/);
+  assert.match(index, /127\.0\.0\.1:8765/);
+  assert.match(index, /zebra_agent\.py/);
+});
+
 test("el añadido de cierre es un desplegable de 0,06 u 0,15 m enlazado al proyecto", () => {
   assert.match(index, /id="p-closureAdd"/);
   assert.match(index, /option value="0\.06"/);

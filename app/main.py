@@ -370,7 +370,7 @@ async def security_middleware(
         "script-src 'self' 'unsafe-inline' https://browser.sentry-cdn.com; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
-        "connect-src 'self' https://*.sentry.io; "
+        "connect-src 'self' https://*.sentry.io http://127.0.0.1:8765 http://localhost:8765; "
         "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     )
     if settings.cookie_https_only:

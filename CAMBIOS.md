@@ -2,6 +2,14 @@
 
 Fecha de cierre técnico: 29 de julio de 2026.
 
+## Envío directo a la Zebra con agente local (un clic) (13 de agosto de 2026)
+
+- Botón «Enviar a Zebra» en la vista de etiquetas: genera el ZPL y lo envía en un clic a la impresora por red.
+- Nuevo script `scripts/zebra_agent.py <IP>`: mini-servicio local (HTTP en 127.0.0.1:8765) que recibe el ZPL de la app y lo reenvía en bruto a la Zebra por el puerto 9100. Deja el agente corriendo en el PC del taller (puede iniciarse con Windows).
+- El CSP de la app permite ahora conectar solo a `http://127.0.0.1:8765` y `http://localhost:8765` (el agente local), sin ampliar nada más.
+- Verificación end-to-end con impresora simulada en el puerto 9100: el ZPL llega íntegro (2 bloques ^XA/^XZ, códigos de barras ^BC y códigos de trazabilidad).
+- Tests estáticos del botón, la función de envío y el agente.
+
 ## Etiquetas en formato ZPL nativo (Zebra) (13 de agosto de 2026)
 
 - Botón «ZPL Zebra» en la vista de etiquetas: genera el **código ZPL nativo** (el formato que entiende una impresora de etiquetas Zebra) de todas las etiquetas filtradas, con el tamaño elegido (40×60, 40×50, …).
