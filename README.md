@@ -102,8 +102,14 @@ npm audit --audit-level=high
 
 En PowerShell active el entorno con `.\.venv\Scripts\Activate.ps1`. Sin `DATABASE_URL`, el modo de desarrollo usa SQLite; producción exige PostgreSQL.
 
+### Versiones
+
+La versión de la aplicación vive en una única fuente, `app/__init__.py` (`__version__`), y desde ahí se propaga a la API (`/api/config.js` → `window.APP_CONFIG.version`), al release de Sentry y al pie de los documentos generados. Al publicar una versión, además de editar `__version__`, sincronice la etiqueta por defecto de la imagen (`APP_IMAGE_TAG` en `docker-compose.yml`), el nombre de caché de la PWA (`app/static/sw.js`) y `version` en `package.json`/`package-lock.json`, y cree el tag git correspondiente (p. ej. `v2.1.7`).
+
 ## Impresión y PWA
 
-La impresión es deliberadamente manual: el navegador abre el diálogo del equipo del operario y utiliza su impresora local predeterminada. No hay impresión silenciosa. El service worker no almacena respuestas de `/api/` ni datos empresariales y los datos de trabajo no se persisten en `localStorage`.
+La impresión es deliberadamente manual: el navegador abre el diálogo del equipo del operario y utiliza su impresora local predeterminada. No hay impresión silenciosa. El service worker no almacena respuestas de `/api/` ni datos empresariales. La única persistencia en el navegador es un borrador temporal (`egea-draft-v1:`) que se guarda ante cierres o cortes de red y se elimina en cuanto el guardado llega al servidor; el resto de datos de trabajo viven en el servidor.
+
+El botón «Enviar a Zebra» usa el agente local `scripts/zebra_agent.py`, que solo acepta peticiones cuyo origen coincida con `ZEBRA_ALLOWED_ORIGIN` (p. ej. `ZEBRA_ALLOWED_ORIGIN=https://confeccion.example.com` al arrancarlo en el PC del taller); sin esa variable solo admite orígenes locales, para desarrollo.
 
 Para instalar en Windows, abra la URL HTTPS en Edge o Chrome y elija **Instalar Confección Central**. Las actualizaciones de la PWA usan una caché versionada y red prioritaria para evitar mantener una interfaz antigua.

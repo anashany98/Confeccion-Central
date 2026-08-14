@@ -15,11 +15,12 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import delete, func, or_, select, text, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
 
+from . import __version__
 from .config import settings
 from .database import get_db
 from .history import diff_states
@@ -137,11 +138,20 @@ def _positive(value: Any) -> bool:
     return _decimal(value) > 0
 
 
+def _row_label(row: dict[str, Any]) -> str:
+    """Identificador de un hueco: bloque · planta · habitación (según estén rellenos)."""
+    return " · ".join(
+        str(row.get(key, "")).strip()
+        for key in ("block", "floor", "room")
+        if str(row.get(key, "")).strip()
+    )
+
+
 def _data_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         row
         for row in state.get("rows", [])
-        if str(row.get("room", "")).strip()
+        if _row_label(row)
         or _positive(row.get("width"))
         or _positive(row.get("height"))
         or str(row.get("notes", "")).strip()
@@ -152,9 +162,7 @@ def _ready_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         row
         for row in state.get("rows", [])
-        if str(row.get("room", "")).strip()
-        and _positive(row.get("width"))
-        and _positive(row.get("height"))
+        if _row_label(row) and _positive(row.get("width")) and _positive(row.get("height"))
     ]
 
 
@@ -178,7 +186,9 @@ def job_payload(job: Job, include_state: bool = True) -> dict[str, Any]:
             "id": job.created_by_id,
             "name": (job.created_by.full_name or job.created_by.username) if job.created_by else "",
         },
-        "updated_by": job.updated_by.full_name or job.updated_by.username if job.updated_by else "",
+        "updated_by": (
+            (job.updated_by.full_name or job.updated_by.username) if job.updated_by else ""
+        ),
     }
     if include_state:
         payload["state"] = job.state_json or {}
@@ -251,7 +261,7 @@ def order_payload(
         "room_count": len(rows),
         "panel_count": sum(max(1, int(_decimal(row.get("sheets"), "1"))) for row in rows),
         "created_by": (
-            order.created_by.full_name or order.created_by.username if order.created_by else ""
+            (order.created_by.full_name or order.created_by.username) if order.created_by else ""
         ),
         "created_at": order.created_at.isoformat(),
         "updated_at": order.updated_at.isoformat(),
@@ -298,7 +308,7 @@ docs_url = "/docs" if settings.docs_enabled else None
 openapi_url = "/openapi.json" if settings.docs_enabled else None
 app = FastAPI(
     title="Confección Central",
-    version="2.0.0",
+    version=__version__,
     lifespan=lifespan,
     docs_url=docs_url,
     redoc_url=None,
@@ -318,7 +328,7 @@ if settings.sentry_dsn:
     sentry_sdk.init(
         dsn=settings.sentry_dsn,
         environment=settings.app_env,
-        release="confeccion-central@2.0.0",
+        release=f"confeccion-central@{__version__}",
         traces_sample_rate=0.0,  # Solo errores, sin tracing
         send_default_pii=False,  # No enviar datos personales
         integrations=[
@@ -358,6 +368,13 @@ async def security_middleware(
         return JSONResponse(
             status_code=413, content={"detail": "La solicitud supera el tamaño permitido"}
         )
+    # Sin Content-Length (transfer-encoding chunked) el límite anterior no aplica
+    # y el body se lee entero en memoria; lo rechazamos para no saltar el tope.
+    # El frontend siempre envía Content-Length (fetch con body JSON).
+    if "chunked" in request.headers.get("transfer-encoding", "").lower():
+        return JSONResponse(
+            status_code=413, content={"detail": "La solicitud supera el tamaño permitido"}
+        )
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -365,9 +382,12 @@ async def security_middleware(
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     # browser.sentry-cdn.com / *.sentry.io solo se usan si SENTRY_DSN está definido
     # (index.html carga el SDK dinámicamente); sin DSN estas entradas son inertes.
+    # Sin 'unsafe-inline' en script-src: todo el JS vive en archivos propios
+    # (app.js, central.js, logic.js, sentry.js). style-src conserva 'unsafe-inline'
+    # porque hay estilos en línea en el HTML.
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://browser.sentry-cdn.com; "
+        "script-src 'self' https://browser.sentry-cdn.com; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "connect-src 'self' https://*.sentry.io http://127.0.0.1:8765 http://localhost:8765; "
@@ -566,7 +586,6 @@ def change_password(
     # justo después de cumplir la política.
     if not forced_change:
         user.auth_version += 1
-    db.commit()
     add_audit(
         db,
         request,
@@ -717,7 +736,7 @@ def _sync_rooms(db: Session, job: Job, state: dict[str, Any]) -> None:
             JobRoom(
                 job_id=job.id,
                 source_id=str(row["id"]),
-                room_code=str(row["room"]).strip(),
+                room_code=_row_label(row)[:120],
                 width_m=_decimal(row["width"]),
                 height_m=_decimal(row["height"]),
                 gather=_decimal(row.get("gather"), "1"),
@@ -825,14 +844,19 @@ def save_job(
     else:
         assert job is not None
         before = copy.deepcopy(job.state_json or {})
-        events = diff_states(before, state)
-        job.name = name
-        job.client = client
-        job.state_json = state
-        job.versions_json = payload.versions
-        job.updated_by_id = user.id
-        job.updated_at = utcnow()
-        job.version += 1
+        # Solo se considera cambio real si el documento o el nombre/cliente difieren;
+        # un "guardar" sin cambios no debe incrementar la versión (evita conflictos
+        # 409 espurios entre usuarios que pulsan guardar sin modificar nada).
+        changed = before != state or job.name != name or job.client != client
+        events = diff_states(before, state) if changed else []
+        if changed:
+            job.name = name
+            job.client = client
+            job.state_json = state
+            job.versions_json = payload.versions
+            job.updated_by_id = user.id
+            job.updated_at = utcnow()
+            job.version += 1
 
     assert job is not None
     _sync_rooms(db, job, state)
@@ -840,10 +864,14 @@ def save_job(
         add_audit(
             db,
             request,
-            action="save_no_changes",
+            action="update" if changed else "save_no_changes",
             entity_type="job",
             entity_id=job.id,
-            summary=f"Trabajo {job.name} guardado sin cambios",
+            summary=(
+                f"Trabajo {job.name} actualizado (detalle no auditado)"
+                if changed
+                else f"Trabajo {job.name} guardado sin cambios"
+            ),
             user_id=user.id,
             job_id=job.id,
             reason=payload.reason,
@@ -1071,7 +1099,7 @@ def _add_order_items(db: Session, order: CutOrder, snapshot: dict[str, Any]) -> 
             CutOrderItem(
                 order_id=order.id,
                 source_room_id=str(row.get("id") or ""),
-                room_code=str(row["room"]).strip(),
+                room_code=_row_label(row)[:120],
                 width_m=width,
                 height_m=_decimal(row["height"]),
                 gather=gather,
@@ -1107,14 +1135,14 @@ def create_order(
         invalid = [
             row
             for row in rows
-            if not str(row.get("room", "")).strip()
+            if not _row_label(row)
             or not _positive(row.get("width"))
             or not _positive(row.get("height"))
         ]
         if not rows:
             raise HTTPException(status_code=422, detail="El trabajo no contiene habitaciones")
         if invalid:
-            names = [str(row.get("room") or "sin número") for row in invalid[:8]]
+            names = [_row_label(row) or "sin identificar" for row in invalid[:8]]
             raise HTTPException(
                 status_code=422, detail=f"Hay habitaciones incompletas: {', '.join(names)}"
             )
@@ -1217,7 +1245,7 @@ def list_orders(
     user: User = Depends(require_permission("orders_view")),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    query = select(CutOrder)
+    query = select(CutOrder).options(selectinload(CutOrder.job), selectinload(CutOrder.created_by))
     count_query = select(func.count(CutOrder.id))
     if order_status:
         query = query.where(CutOrder.status == order_status)
@@ -1398,6 +1426,7 @@ def frontend_config() -> Response:
     payload = {
         "sentryDsn": settings.sentry_dsn or None,
         "environment": settings.app_env,
+        "version": __version__,
     }
     # JSON.stringify evita inyección; se sirve como JS ejecutable.
     import json as _json
@@ -1407,7 +1436,10 @@ def frontend_config() -> Response:
 
 
 @app.get("/{path:path}", include_in_schema=False)
-def frontend(path: str) -> FileResponse:
+def frontend(path: str) -> Response:
+    # Las rutas /api/* desconocidas deben responder 404 JSON, no el HTML de la SPA.
+    if path.startswith("api/"):
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
     candidate = (STATIC_DIR / path).resolve()
     static_root = STATIC_DIR.resolve()
     if path and candidate.is_file() and candidate.is_relative_to(static_root):

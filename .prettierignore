@@ -1,5 +1,10 @@
+# Archivos con finales de línea CRLF (convención del repo; prettier espera LF).
 app/static/index.html
 app/static/central.css
+app/static/central.js
+app/static/app.js
+app/static/sentry.js
+app/static/sw.js
 app/static/vendor/
 coverage.xml
 htmlcov/

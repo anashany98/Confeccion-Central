@@ -79,19 +79,21 @@
           timeStyle: "short",
         })
       : "—";
+  const rowLabel = (row) =>
+    [row?.block, row?.floor, row?.room]
+      .map((part) => String(part ?? "").trim())
+      .filter(Boolean)
+      .join(" · ");
   const hasData = (row) =>
     Boolean(
-      String(row?.room ?? "").trim() ||
+      rowLabel(row) ||
       number(row?.width) ||
       number(row?.height) ||
       String(row?.notes ?? "").trim(),
     );
   const readyRows = (state) =>
     (state?.rows || []).filter(
-      (row) =>
-        String(row.room ?? "").trim() &&
-        number(row.width) > 0 &&
-        number(row.height) > 0,
+      (row) => rowLabel(row) && number(row.width) > 0 && number(row.height) > 0,
     );
   const dataRows = (state) => (state?.rows || []).filter(hasData);
   const debounce = (fn, ms = 150) => {
@@ -1049,7 +1051,7 @@
           meters: 0,
         });
       const group = groups.get(key);
-      group.rooms.push(String(row.room));
+      group.rooms.push(rowLabel(row));
       group.panels += calc.sheets;
       group.meters += calc.meters;
     });
@@ -1126,34 +1128,36 @@
     const meta = `<div class="meta"><div><span>Tela</span><b>${escapeHtml(project.fabricName || project.fabricType || "Sin indicar")}</b></div><div><span>Ancho tela</span><b>${formatNumber(project.fabricWidth)} m</b></div><div><span>Habitaciones</span><b>${rows.length}</b></div><div><span>Paños</span><b>${rows.reduce((sum, row) => sum + calculateRow(row, project).sheets, 0)}</b></div></div>`;
     let content = "";
     if (include("order"))
-      content += `<section class="page">${header}${meta}<h2 class="section-title">Resumen de la orden</h2>${cutTablePrint(groups)}<h2 class="section-title">Relación de habitaciones</h2>${roomsTablePrint(rows, project)}</section>`;
+      content += `<section class="page">${header}${meta}<h2 class="section-title">Resumen de la orden</h2>${cutTablePrint(groups, project)}<h2 class="section-title">Relación de habitaciones</h2>${roomsTablePrint(rows, project)}</section>`;
     if (include("cuts") && documentType !== "all")
-      content += `<section class="page">${header}${meta}<h2 class="section-title">Tabla de cortes</h2>${cutTablePrint(groups)}</section>`;
+      content += `<section class="page">${header}${meta}<h2 class="section-title">Tabla de cortes</h2>${cutTablePrint(groups, project)}</section>`;
     if (include("confection"))
       content += `<section class="page">${header}<h2 class="section-title">Hojas de confección</h2>${roomsTablePrint(rows, project, true)}</section>`;
     return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>${escapeHtml(order.order_number)}</title>${style}</head><body>${content}</body></html>`;
   }
 
-  function cutTablePrint(groups) {
-    return `<table><thead><tr><th>Corte</th><th>Ancho</th><th>Alto</th><th>Paños</th><th>Metros</th><th>Habitaciones</th></tr></thead><tbody>${groups.map((group) => `<tr><td><b>${group.code}</b></td><td>${formatNumber(group.cutWidth)} m</td><td>${formatNumber(group.cutHeight)} m</td><td>${group.panels}</td><td>${formatNumber(group.meters)} m</td><td>${escapeHtml(group.rooms.join(", "))}</td></tr>`).join("")}</tbody></table>`;
+  function cutTablePrint(groups, project) {
+    const idHead = project?.useBlockFloor ? "Identificadores" : "Habitaciones";
+    return `<table><thead><tr><th>Corte</th><th>Ancho</th><th>Alto</th><th>Paños</th><th>Metros</th><th>${idHead}</th></tr></thead><tbody>${groups.map((group) => `<tr><td><b>${group.code}</b></td><td>${formatNumber(group.cutWidth)} m</td><td>${formatNumber(group.cutHeight)} m</td><td>${group.panels}</td><td>${formatNumber(group.meters)} m</td><td>${escapeHtml(group.rooms.join(", "))}</td></tr>`).join("")}</tbody></table>`;
   }
 
   function roomsTablePrint(rows, project, confection = false) {
     // Las hojas de confección muestran un ancho de corte por paño/hoja
     // (2 columnas si hay 2 hojas, 1 si es hoja única) con la altura al lado;
     // la orden de corte mantiene su disposición original.
+    const idHead = project?.useBlockFloor ? "Identificador" : "Hab.";
     const header = confection
-      ? "<tr><th>Hab.</th><th>Ancho hueco</th><th>Hojas</th><th>Ancho 1</th><th>Ancho 2</th><th>Altura</th><th>Fruncido</th><th>Bajo</th><th>Observaciones</th></tr>"
-      : "<tr><th>Hab.</th><th>Ancho hueco</th><th>Altura</th><th>Hojas</th><th>Corte por paño</th><th>Fruncido</th><th>Observaciones</th></tr>";
+      ? `<tr><th>${idHead}</th><th>Ancho hueco</th><th>Hojas</th><th>Ancho 1</th><th>Ancho 2</th><th>Altura</th><th>Fruncido</th><th>Bajo</th><th>Observaciones</th></tr>`
+      : `<tr><th>${idHead}</th><th>Ancho hueco</th><th>Altura</th><th>Hojas</th><th>Corte por paño</th><th>Fruncido</th><th>Observaciones</th></tr>`;
     return `<table><thead>${header}</thead><tbody>${rows
       .map((row) => {
         const c = calculateRow(row, project);
         if (confection) {
           const width2 =
             c.sheets > 1 ? `<td>${formatNumber(c.cutWidth)}</td>` : "<td></td>";
-          return `<tr><td><b>${escapeHtml(row.room)}</b></td><td>${formatNumber(c.width)} m</td><td>${c.sheets}</td><td>${formatNumber(c.cutWidth)}</td>${width2}<td>${formatNumber(c.height)} m</td><td>${formatNumber(c.gather)}</td><td>${formatNumber(row.hem ?? project.hem)} m</td><td>${escapeHtml(row.notes || "")}</td></tr>`;
+          return `<tr><td><b>${escapeHtml(rowLabel(row))}</b></td><td>${formatNumber(c.width)} m</td><td>${c.sheets}</td><td>${formatNumber(c.cutWidth)}</td>${width2}<td>${formatNumber(c.height)} m</td><td>${formatNumber(c.gather)}</td><td>${formatNumber(row.hem ?? project.hem)} m</td><td>${escapeHtml(row.notes || "")}</td></tr>`;
         }
-        return `<tr><td><b>${escapeHtml(row.room)}</b></td><td>${formatNumber(c.width)} m</td><td>${formatNumber(c.height)} m</td><td>${c.sheets}</td><td>${formatNumber(c.cutWidth)} × ${formatNumber(c.cutHeight)} m</td><td>${formatNumber(c.gather)}</td><td>${escapeHtml(row.notes || "")}</td></tr>`;
+        return `<tr><td><b>${escapeHtml(rowLabel(row))}</b></td><td>${formatNumber(c.width)} m</td><td>${formatNumber(c.height)} m</td><td>${c.sheets}</td><td>${formatNumber(c.cutWidth)} × ${formatNumber(c.cutHeight)} m</td><td>${formatNumber(c.gather)}</td><td>${escapeHtml(row.notes || "")}</td></tr>`;
       })
       .join("")}</tbody></table>`;
   }
