@@ -84,9 +84,16 @@
     const sheets = Math.max(1, Math.round(num(r.sheets) || p.mode || 1));
     const hem = Math.max(0, num(r.hem ?? p.hem));
 
-    const measure = width * gather,
-      measurePerSheet = sheets ? measure / sheets : measure,
-      meters = measure;
+    // Añadido de cierre por hoja (0,06 u 0,15 m). El cierre NO se frunce: es una
+    // tira plana que se suma a cada paño, por eso en los metros va sin multiplicar
+    // por el fruncido (solo el cuerpo del paño se frunce).
+    const closureAdd = num(p.closureAdd) || FIXED_CLOSURE_ADD;
+    // Metros de tela: cuerpo fruncido (ancho × fruncido) + cierre plano por hoja.
+    const meters = width * gather + closureAdd * sheets,
+      measurePerSheet = sheets ? meters / sheets : meters,
+      // Tela base sin el añadido de cierre (ancho × fruncido); la diferencia
+      // con `meters` es exactamente el cierre (cierre × hojas, sin fruncir).
+      metersBase = width * gather;
     const fabricPrice = num(p.priceFabric),
       confectionPrice = num(p.priceConfection),
       installationCost = num(p.priceInstallation);
@@ -97,21 +104,25 @@
       total = base + benefit;
     const finalHeight = Math.max(0, height - num(p.heightDiscount)),
       standardWidth = Math.round(width / 0.05) * 0.05,
-      cutWidth = (standardWidth / sheets) * gather,
+      // Ancho de corte real (cuadrante): cuerpo con fruncido + cierre plano.
+      cutWidth = (standardWidth / sheets) * gather + closureAdd,
       cutHeight = Math.round(finalHeight / 0.03) * 0.03;
-    const panelWidth = width / sheets + (num(p.closureAdd) || FIXED_CLOSURE_ADD),
+    // Hoja de confección SIN fruncido: ancho terminado de cada paño y metros a la
+    // medida final (el fruncido lo aplica el taller al coser, no se calcula aquí).
+    const panelWidth = width / sheets + closureAdd,
+      sheetWidth = standardWidth / sheets + closureAdd,
+      sheetMeters = width + closureAdd * sheets,
+      sheetMetersPerSheet = sheets ? sheetMeters / sheets : sheetMeters,
       metersPerSheet = sheets ? meters / sheets : meters;
 
     // Validaciones de lógica de negocio (no son errores fatales: warnings).
     const fabricWidth = num(p.fabricWidth);
-    // Margen de seguridad de 10 cm: avisa antes de llegar al límite del ancho de tela.
-    if (fabricWidth > 0 && cutWidth > fabricWidth - 0.1) {
-      issues.push(cutWidth > fabricWidth
-        ? `Ancho de corte ${fmt(cutWidth)} m excede el ancho de tela (${fmt(fabricWidth)} m)`
-        : `Ancho de corte ${fmt(cutWidth)} m a menos de 10 cm del ancho de tela (${fmt(fabricWidth)} m)`);
-    }
-    if (fabricWidth > 0 && cutHeight > 0 && cutHeight > fabricWidth) {
-      issues.push(`Alto de corte ${fmt(cutHeight)} m no cabe en el ancho de tela (${fmt(fabricWidth)} m)`);
+    // El ancho del rollo de tela limita el ALTO de hueco (la cortina se corta a lo
+    // largo del rollo). Margen de seguridad de 10 cm antes de llegar al límite.
+    if (fabricWidth > 0 && cutHeight > 0 && cutHeight > fabricWidth - 0.1) {
+      issues.push(cutHeight > fabricWidth
+        ? `Alto de corte ${fmt(cutHeight)} m excede el ancho de tela (${fmt(fabricWidth)} m)`
+        : `Alto de corte ${fmt(cutHeight)} m a menos de 10 cm del ancho de tela (${fmt(fabricWidth)} m)`);
     }
     if (cutHeight > 0 && cutHeight < 0.4) {
       issues.push(`Alto de corte muy corto: ${fmt(cutHeight)} m (mínimo recomendado 0,4 m)`);
@@ -133,9 +144,10 @@
       height,
       gather,
       sheets,
-      measure,
+      measure: meters,
       measurePerSheet,
       meters,
+      metersBase,
       fabricPrice,
       confectionPrice,
       installationCost,
@@ -149,6 +161,9 @@
       cutWidth,
       cutHeight,
       panelWidth,
+      sheetWidth,
+      sheetMeters,
+      sheetMetersPerSheet,
       metersPerSheet,
     };
   }

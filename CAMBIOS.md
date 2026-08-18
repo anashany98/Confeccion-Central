@@ -2,6 +2,32 @@
 
 Fecha de cierre técnico: 29 de julio de 2026.
 
+## El alto de corte se agrupa al múltiplo de 3 cm más cercano (18 de agosto de 2026)
+
+- En el cuadrante de corte y en la hoja de confección, la columna «Alto corte» mostraba el alto final sin redondear (p. ej. 2,89), mientras el corte por paño iba a 2,88.
+- Ahora «Alto corte» usa el mismo valor agrupado que el corte por paño: redondeo al múltiplo de 3 cm más cercano (`round((altura − descuento) / 0,03) × 0,03`), «3 cm más o 3 cm menos, lo que esté más cercano».
+
+## Aviso de tela por alto, confección sin fruncido, cierre plano y exportación de rieles (18 de agosto de 2026)
+
+- El aviso de ancho de tela ahora se basa en el **alto de hueco** (el ancho del rollo limita el alto de la cortina): «Alto de corte X m a menos de 10 cm del ancho de tela» / «…excede el ancho de tela». El ancho de corte ya no dispara este aviso.
+- La **hoja de confección** (impresa y hoja Excel CONFECCIÓN) va **sin fruncido**: Ancho 1/Ancho 2 y m/hoja muestran el ancho terminado de cada paño (`ancho/hojas + cierre`) y Suma m suma `ancho + cierre × hojas`. El fruncido lo aplica el taller al coser; la compra de tela sigue con fruncido en la relación, resumen, revisión y pedido.
+- El **añadido de cierre ya no se frunce**: es una tira plana. `m/hoja = ancho/hojas × fruncido + cierre`, `metros = ancho × fruncido + cierre × hojas`, y el ancho de corte del cuadrante es `ancho/hojas × fruncido + cierre`. El desglose del resumen queda como «Base ancho × fruncido + Cierre cierre × hojas».
+- **Rieles dobles**: el riel oscurante suma siempre el añadido de cierre configurado (0,06 u 0,15 m — nunca un fijo); la tabla de rieles muestra ahora el valor aplicado.
+- **Exportar rieles a Excel**: nuevo botón en la vista Rieles que descarga un libro con las hojas RIELES y RIELES DOBLES (visillo, oscurante con sus unidades, soportes y escuadras); la hoja RIELES del libro completo también incluye el riel oscurante.
+- Service worker a v2.2.0 para refrescar la caché de la PWA.
+
+## Desglose de metros en el resumen de cortes: tela base + añadido de cierre (18 de agosto de 2026)
+
+- La tarjeta «Metros de tela» del resumen (Tabla de cortes) muestra ahora el total con el desglose debajo: «Base X,XX m + Cierre X,XX m».
+- Nuevo campo `metersBase` en `calcRowFor` (ancho × fruncido, sin cierre): la diferencia con `meters` es exactamente el cierre (cierre × hojas × fruncido), así el desglose cuadra siempre con el total.
+
+## Corrección: el añadido de cierre ahora suma en los metros y en el riel oscurante (18 de agosto de 2026)
+
+- El «Añadido para cierre» solo se mostraba en el ancho de panel (`panelWidth`) y no afectaba a ningún total: los metros de tela, el m/hoja, los totales de la relación, la hoja de confección, la orden y el Excel se calculaban solo con `ancho × fruncido`.
+- Ahora el cierre forma parte del ancho de cada paño y se frunce con el resto: `m/hoja = (ancho/hojas + cierre) × fruncido` y `metros = (ancho + cierre × hojas) × fruncido`. El ancho de corte (Ancho 1/Ancho 2) también lo incluye, de modo que la suma de la hoja de confección sigue cuadrando con lo que se corta.
+- El riel oscurante de los rieles dobles usaba un solape fijo de 10 cm; ahora usa el valor configurado del añadido de cierre (0,06 u 0,15 m).
+- Tests actualizados y ampliados: el cierre suma en m/hoja, total y ancho de corte; el riel oscurante usa el valor configurado.
+
 ## Envío directo a la Zebra con agente local (un clic) (13 de agosto de 2026)
 
 - Botón «Enviar a Zebra» en la vista de etiquetas: genera el ZPL y lo envía en un clic a la impresora por red.

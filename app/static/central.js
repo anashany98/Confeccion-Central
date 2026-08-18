@@ -728,11 +728,14 @@
       1,
       Math.round(number(row.sheets) || number(project.mode) || 1),
     );
+    // Mismo criterio que calcRowFor (logic.js): el añadido de cierre es una tira
+    // plana que NO se frunce; solo el cuerpo del paño lleva fruncido.
+    const closureAdd = number(project.closureAdd) || window.FIXED_CLOSURE_ADD;
     const finalHeight = Math.max(0, height - number(project.heightDiscount));
     const standardWidth = Math.round(width / 0.05) * 0.05;
-    const cutWidth = (standardWidth / sheets) * gather;
+    const cutWidth = (standardWidth / sheets) * gather + closureAdd;
     const cutHeight = Math.round(finalHeight / 0.03) * 0.03;
-    const meters = width * gather;
+    const meters = width * gather + closureAdd * sheets;
     return {
       width,
       height,

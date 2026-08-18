@@ -1,4 +1,4 @@
-const CACHE = "confeccion-central-v2.1.1";
+const CACHE = "confeccion-central-v2.2.0";
 const STATIC = [
   "/",
   "/static/central.css",
