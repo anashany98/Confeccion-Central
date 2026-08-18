@@ -30,10 +30,9 @@ test("las respuestas API no se almacenan en la caché", () => {
   assert.match(serviceWorker, /url\.pathname\.startsWith\(["']\/api\/["']\)/);
 });
 
-test("los avisos de ancho/alto de corte vs ancho de tela llegan a la revisión visual", () => {
-  assert.match(app, /Ancho de corte .*excede el ancho de tela/);
-  assert.match(app, /Ancho de corte .*a menos de 10 cm del ancho de tela/);
-  assert.match(app, /Alto de corte .*no cabe en el ancho de tela/);
+test("el aviso de ancho de tela se basa en el alto de hueco y llega a la revisión visual", () => {
+  assert.match(app, /Alto de corte \$\{fmt\(c\.cutHeight\)\} m excede el ancho de tela/);
+  assert.match(app, /Alto de corte \$\{fmt\(c\.cutHeight\)\} m a menos de 10 cm del ancho de tela/);
   assert.match(app, /t\.includes\('ancho de tela'\)/);
 });
 
@@ -89,6 +88,37 @@ test("el añadido de cierre es un desplegable de 0,06 u 0,15 m enlazado al proye
   assert.match(index, /option value="0\.06"/);
   assert.match(index, /option value="0\.15"/);
   assert.match(app, /'p-closureAdd':'closureAdd'/);
+});
+
+test("el alto de corte se agrupa al múltiplo de 3 cm más cercano en cuadrante y confección", () => {
+  // Cuadrante: la columna «Alto corte» usa cutHeight (redondeado a 0,03) igual que el corte por paño.
+  assert.match(app, /cutHeight\)\}<\/td><td class="key-cut">\$\{fmt\(c\.cutWidth\)\}/);
+  // Hoja de confección: la columna «Alto corte» también usa cutHeight.
+  assert.match(app, /sheetWidth\)\}<\/td>\$\{cut2\}<td>\$\{fmt\(c\.cutHeight\)\}<\/td>/);
+});
+
+test("el riel oscurante usa el añadido de cierre configurado (no un fijo de 10 cm)", () => {
+  assert.match(app, /dark:final\/2\+closure/);
+  assert.match(app, /closure=\(num\(state\.project\.closureAdd\)\|\|FIXED_CLOSURE_ADD\)/);
+});
+
+test("el resumen de cortes desglosa metros base y añadido de cierre", () => {
+  assert.match(app, /Base \$\{fmt\(baseMeters\)\} m \+ Cierre \$\{fmt\(closureMeters\)\} m<\/small>/);
+  assert.match(app, /metersBase/);
+});
+
+test("la hoja de confección va sin fruncido y el cierre no se modifica", () => {
+  assert.match(app, /fmt\(c\.sheetWidth\)/);
+  assert.match(app, /fmt\(c\.sheetMeters\)/);
+  assert.match(app, /sheetMetersPerSheet/);
+  assert.match(app, /reduce\(\(a,x\)=>a\+calcRow\(x\)\.sheetMeters,0\)/);
+});
+
+test("la vista de rieles permite exportar a Excel (simple y dobles)", () => {
+  assert.match(index, /id="exportRailsBtn"/);
+  assert.match(app, /function exportRailsXLSX/);
+  assert.match(app, /'RIELES DOBLES'/);
+  assert.match(app, /x\.dark,2/);
 });
 
 test("los scripts externos son JavaScript válido", () => {

@@ -50,9 +50,24 @@ test("parseDimension: conversión por magnitud (cm/mm estimados)", () => {
 test("calcRow usa el añadido de cierre del proyecto (0,06 u 0,15 m)", () => {
   const c15 = calcRowFor(row({ width: "4,75", gather: "1,5", sheets: 2 }), { ...project(), closureAdd: 0.15 });
   assert.equal(round(c15.panelWidth, 4), round(4.75 / 2 + 0.15, 4));
+  // El cierre es una tira plana: NO se multiplica por el fruncido.
+  assert.equal(round(c15.metersPerSheet, 4), round((4.75 / 2) * 1.5 + 0.15, 4));
+  assert.equal(round(c15.meters, 4), round(4.75 * 1.5 + 0.15 * 2, 4));
+  // Desglose: la base es ancho × fruncido y la diferencia es el cierre plano.
+  assert.equal(round(c15.metersBase, 4), round(4.75 * 1.5, 4));
+  assert.equal(round(c15.meters - c15.metersBase, 4), round(0.15 * 2, 4));
+  // El ancho de corte del cuadrante: cuerpo fruncido + cierre plano.
+  assert.equal(round(c15.cutWidth, 4), round((4.75 / 2) * 1.5 + 0.15, 4));
+  // Hoja de confección SIN fruncido: ancho terminado y metros a la medida final.
+  assert.equal(round(c15.sheetWidth, 4), round(4.75 / 2 + 0.15, 4));
+  assert.equal(round(c15.sheetMeters, 4), round(4.75 + 0.15 * 2, 4));
+  assert.equal(round(c15.sheetMetersPerSheet, 4), round(4.75 / 2 + 0.15, 4));
   // Sin closureAdd (proyectos antiguos) cae al valor por defecto 0,06.
   const c06 = calcRowFor(row({ width: "4,75", gather: "1,5", sheets: 2 }), project());
   assert.equal(round(c06.panelWidth, 4), round(4.75 / 2 + FIXED_CLOSURE_ADD, 4));
+  assert.equal(round(c06.meters, 4), round(4.75 * 1.5 + FIXED_CLOSURE_ADD * 2, 4));
+  // 0,15 m suma más que 0,06 m en el total.
+  assert.ok(c15.meters > c06.meters);
 });
 
 test("calcRow reproduce el caso real del cuadrante (1101: 4,75×2,81, 1,50, 2 hojas)", () => {
@@ -62,14 +77,18 @@ test("calcRow reproduce el caso real del cuadrante (1101: 4,75×2,81, 1,50, 2 ho
   assert.equal(c.height, 2.81);
   assert.equal(c.gather, 1.5);
   assert.equal(c.sheets, 2);
-  // Medida de tela = ancho × fruncido.
-  assert.equal(round(c.meters, 4), 7.125);
-  assert.equal(round(c.metersPerSheet, 4), 3.5625); // m/hoja -> 3,56
+  // Metros de tela = cuerpo fruncido + cierre plano (no se frunce).
+  assert.equal(round(c.meters, 4), 7.245); // 4,75 × 1,50 + 0,06 × 2
+  assert.equal(round(c.metersBase, 4), 7.125); // sin cierre: 4,75 × 1,50
+  assert.equal(round(c.metersPerSheet, 4), 3.6225); // m/hoja -> 3,62
   // Alto de corte = altura - descuento, redondeado a 0,03.
   assert.equal(c.finalHeight, round(2.81 - 0.02, 4));
   assert.equal(c.cutHeight, 2.79);
-  // Ancho de corte = (ancho redondeado a 0,05 / hojas) × fruncido.
-  assert.equal(round(c.cutWidth, 2), 3.56);
+  // Ancho de corte (cuadrante) = cuerpo con fruncido + cierre plano.
+  assert.equal(round(c.cutWidth, 2), 3.62);
+  // Hoja de confección sin fruncido: ancho terminado y metros a medida final.
+  assert.equal(round(c.sheetWidth, 4), round(4.75 / 2 + FIXED_CLOSURE_ADD, 4));
+  assert.equal(round(c.sheetMeters, 4), round(4.75 + FIXED_CLOSURE_ADD * 2, 4));
   // Panel = ancho/hojas + cierre fijo.
   assert.equal(round(c.panelWidth, 4), round(4.75 / 2 + FIXED_CLOSURE_ADD, 4));
   assert.equal(c.ok, true, "sin warnings: " + c.issues.join(" | "));
@@ -85,19 +104,27 @@ test("calcRow sanea entradas: sin NaN ni negativos", () => {
   assert.ok(c.issues.some((i) => i.includes("no es numérico")));
 });
 
-test("calcRow avisa si el ancho de corte excede el ancho de tela", () => {
-  const c = calcRowFor(row({ width: "3,5", gather: "2,5", sheets: 1 }), project());
+test("calcRow avisa si el alto de corte excede el ancho de tela", () => {
+  // El ancho del rollo limita el ALTO de hueco: 3,00 no cabe en un rollo de 2,80.
+  const c = calcRowFor(row({ width: "1,5", height: "3", gather: "1,5", sheets: 1 }), project());
   assert.equal(c.ok, false);
-  assert.ok(c.issues.some((i) => i.includes("excede el ancho de tela")));
+  assert.ok(c.issues.some((i) => i.includes("Alto de corte") && i.includes("excede el ancho de tela")));
 });
 
-test("calcRow avisa con margen de 10 cm antes del límite del ancho de tela", () => {
-  // cutWidth 2,75 con tela de 2,80: dentro del margen -> aviso sin llegar al límite.
-  const cerca = calcRowFor(row({ width: "2,75", gather: "1", sheets: 1 }), project());
+test("calcRow avisa con margen de 10 cm antes del límite del ancho de tela (por alto)", () => {
+  // Alto de corte 2,73 con tela de 2,80: dentro del margen -> aviso sin llegar al límite.
+  const cerca = calcRowFor(row({ width: "1,5", height: "2,75", gather: "1", sheets: 1 }), project());
   assert.ok(cerca.issues.some((i) => i.includes("a menos de 10 cm del ancho de tela")));
-  // cutWidth 2,60: fuera del margen -> sin aviso.
-  const lejos = calcRowFor(row({ width: "2,6", gather: "1", sheets: 1 }), project());
+  // Alto de corte 2,58: fuera del margen -> sin aviso.
+  const lejos = calcRowFor(row({ width: "1,5", height: "2,6", gather: "1", sheets: 1 }), project());
   assert.ok(!lejos.issues.some((i) => i.includes("ancho de tela")));
+});
+
+test("el ancho de corte ya no dispara el aviso de tela (solo el alto de hueco)", () => {
+  // Un ancho grande (2,70 × 2,50 de fruncido) no avisa aunque el ancho de corte
+  // supere el rollo: el ancho del rollo limita el alto, no el ancho del hueco.
+  const ancho = calcRowFor(row({ width: "2,7", height: "2,2", gather: "2,5", sheets: 1 }), project());
+  assert.ok(!ancho.issues.some((i) => i.includes("ancho de tela")));
 });
 
 test("calcRow avisa con alto de corte fuera de rango", () => {
@@ -107,15 +134,7 @@ test("calcRow avisa con alto de corte fuera de rango", () => {
   assert.ok(largo.issues.some((i) => i.includes("rollo habitual")));
 });
 
-test("calcRow avisa si el alto de corte no cabe en el ancho de tela", () => {
-  // Tela de 2,80 m: una cortina de 3,00 no cabe en un solo ancho.
-  const alto = calcRowFor(row({ width: "1,5", height: "3" }), project());
-  assert.equal(alto.ok, false);
-  assert.ok(alto.issues.some((i) => i.includes("no cabe en el ancho de tela")));
-  // Un alto normal (2,70) cabe sin aviso.
-  const normal = calcRowFor(row({ width: "1,5", height: "2,7" }), project());
-  assert.ok(!normal.issues.some((i) => i.includes("no cabe en el ancho de tela")));
-});
+
 
 test("splitExcelText: tabulaciones, punto y coma y comillas", () => {
   assert.deepEqual(splitExcelText("1101\t4,75\t2,81\n1102\t3,1\t2,2\n"), [
