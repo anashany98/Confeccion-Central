@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend (Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+      - name: Lint (ruff)
+        run: ruff check app tests scripts
+      - name: Formato (black)
+        run: black --check app tests scripts
+      - name: Tipos (mypy)
+        run: mypy app
+      - name: Seguridad estática (bandit)
+        run: bandit -c pyproject.toml -r app
+      - name: Tests con cobertura
+        run: coverage run -m pytest -q && coverage report --fail-under=75
+      - name: Auditoría de dependencias (pip-audit)
+        # Informativo: no bloquea el pipeline si una vulnerabilidad ajena
+        # aparece en una versión concreta; la revisión es manual.
+        continue-on-error: true
+        run: pip-audit -r requirements.txt
+
+  frontend:
+    name: Frontend (Node 22)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Lint (eslint)
+        run: npm run lint
+      - name: Formato (prettier)
+        run: npm run format:check
+      - name: Tests
+        run: npm test
+      - name: Auditoría de dependencias (npm audit)
+        # Informativo: no bloquea el pipeline; la revisión es manual.
+        continue-on-error: true
+        run: npm audit --audit-level=high

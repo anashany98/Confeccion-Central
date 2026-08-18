@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import json
+import re
 import uuid
 
 import pytest
@@ -165,7 +167,75 @@ def test_invalid_and_duplicate_measurements_are_rejected(client: TestClient) -> 
         },
     )
     assert response.status_code == 422
-    assert "duplicadas" in response.text
+    assert "duplicados" in response.text
+
+
+def test_rows_identified_by_block_and_floor_without_room(client: TestClient) -> None:
+    """En México / Caribe un hueco puede identificarse por bloque y planta, sin habitación."""
+    login(client)
+    job_id = new_id()
+    state = sample_state(job_id)
+    state["rows"] = [
+        {
+            "id": f"room-{job_id[-4:]}",
+            "block": "3",
+            "floor": "2",
+            "room": "",
+            "width": "2.40",
+            "height": "2.70",
+            "gather": "2",
+            "hem": "0.25",
+            "sheets": 2,
+            "opening": "central",
+            "notes": "",
+            "status": "pending",
+        }
+    ]
+    response = client.put(
+        f"/api/jobs/{job_id}",
+        json={
+            "name": "México / Caribe",
+            "state": state,
+            "versions": [],
+            "expected_version": None,
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    # La misma habitación en bloques distintos NO es duplicado.
+    ok_id = new_id()
+    ok = sample_state(ok_id)
+    ok["rows"][0]["block"] = "1"
+    ok["rows"][0]["floor"] = "2"
+    ok["rows"].append({**copy.deepcopy(ok["rows"][0]), "id": "other-room", "block": "2"})
+    response = client.put(
+        f"/api/jobs/{ok_id}",
+        json={
+            "name": "Bloques distintos",
+            "state": ok,
+            "versions": [],
+            "expected_version": None,
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    # El mismo identificador combinado (bloque · planta · habitación) sí es duplicado.
+    dup_id = new_id()
+    dup = sample_state(dup_id)
+    dup["rows"][0]["block"] = "1"
+    dup["rows"][0]["floor"] = "2"
+    dup["rows"].append({**copy.deepcopy(dup["rows"][0]), "id": "other-room"})
+    response = client.put(
+        f"/api/jobs/{dup_id}",
+        json={
+            "name": "Duplicado combinado",
+            "state": dup,
+            "versions": [],
+            "expected_version": None,
+        },
+    )
+    assert response.status_code == 422
+    assert "duplicados" in response.text
 
 
 def test_order_snapshot_is_authoritative_immutable_and_locks_job(client: TestClient) -> None:
@@ -307,6 +377,19 @@ def test_usernames_accept_full_email(client: TestClient) -> None:
     logout(client)
     payload = login(client, email, email_password)
     assert payload["user"]["id"] == email_user["id"]
+
+
+def test_version_is_centralized_in_app_package(client: TestClient) -> None:
+    """La versión vive en app/__init__.py y se propaga a config.js y OpenAPI."""
+    import app as app_pkg
+
+    config_js = client.get("/api/config.js").text
+    match = re.search(r"window\.APP_CONFIG=(\{.*\});", config_js, re.DOTALL)
+    assert match is not None
+    assert json.loads(match.group(1))["version"] == app_pkg.__version__
+
+    openapi = client.get("/openapi.json").json()
+    assert openapi["info"]["version"] == app_pkg.__version__
 
 
 def test_production_defaults_are_not_exposed_in_api(client: TestClient) -> None:

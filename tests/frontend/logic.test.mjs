@@ -159,6 +159,24 @@ test("detectExcelColumns reconoce encabezados españoles con tildes y nº", () =
   assert.ok(d.matches >= 6);
 });
 
+test("detectExcelColumns reconoce Bloque y Planta (México / Caribe)", () => {
+  const d = detectExcelColumns(["Bloque", "Planta", "Habitación", "Ancho", "Alto", "Observaciones"]);
+  assert.equal(d.map.block, 0);
+  assert.equal(d.map.floor, 1);
+  assert.equal(d.map.room, 2);
+  assert.equal(d.map.width, 3);
+  assert.equal(d.map.height, 4);
+  const sinHabitacion = detectExcelColumns(["Torre", "Nivel", "Ancho hueco", "Altura"]);
+  assert.equal(sinHabitacion.map.block, 0);
+  assert.equal(sinHabitacion.map.floor, 1);
+  assert.equal(sinHabitacion.map.room, -1);
+  // El encabezado clásico no debe confundir bloque/planta con la habitación.
+  const clasico = detectExcelColumns(["Nº Habitación", "Ancho hueco (m)", "Altura (m)", "Fruncido", "Bajo y cresta", "Nº hojas", "Observaciones"]);
+  assert.equal(clasico.map.block, -1);
+  assert.equal(clasico.map.floor, -1);
+  assert.equal(clasico.map.room, 0);
+});
+
 test("code128Pattern genera Code 128B con Start B, dígito de control y Stop", () => {
   // "AB": valores 33 y 34; checksum = (104 + 33·1 + 34·2) mod 103 = 102.
   assert.equal(

@@ -5,7 +5,7 @@ services:
       args:
         APP_UID: 10001
         APP_GID: 10001
-    image: confeccion-central:2.1.0
+    image: confeccion-central:${APP_IMAGE_TAG:-2.1.7}
     restart: unless-stopped
     init: true
     env_file:
@@ -69,7 +69,7 @@ services:
       - no-new-privileges:true
 
   admin-init:
-    image: confeccion-central:2.1.0
+    image: confeccion-central:${APP_IMAGE_TAG:-2.1.7}
     profiles: ["tools"]
     entrypoint: ["python", "-m", "app.cli", "create-admin"]
     environment:

@@ -28,6 +28,15 @@ Fecha de cierre técnico: 29 de julio de 2026.
 - El riel oscurante de los rieles dobles usaba un solape fijo de 10 cm; ahora usa el valor configurado del añadido de cierre (0,06 u 0,15 m).
 - Tests actualizados y ampliados: el cierre suma en m/hoja, total y ancho de corte; el riel oscurante usa el valor configurado.
 
+## Identificación por bloque y planta (México / Caribe) (14 de agosto de 2026)
+
+- La relación de huecos acepta **Bloque** y **Planta** como identificadores de cada hueco, además de la habitación (o en lugar de ella).
+- Se activa con el check **«Usar Bloque y Planta»** en los datos del trabajo: por defecto está desactivado y la tabla se mantiene igual que siempre (solo habitación); al activarlo aparecen las columnas Bloque y Planta y el identificador combinado se usa en validación, duplicados, impresos y etiquetas.
+- Un hueco se identifica por la combinación `bloque · planta · habitación` (según estén rellenos): sirve para el control de duplicados, la búsqueda, los impresos, el cuadrante de corte, el seguimiento de producción y las etiquetas. El identificador combinado y la cabecera «Identificador» (en vez de «Habitación»/«Nº Hab.») se aplican a **todas** las hojas: relación, confección, cuadrante, tabla de cortes, rieles, producción, etiquetas y la orden impresa de la central.
+- Las etiquetas de paño y su código de barras de trazabilidad usan el identificador combinado (p. ej. `CC-<trabajo>-3-2-H1` para bloque 3, planta 2).
+- Importación: se detectan y asignan automáticamente columnas «Bloque», «Planta», «Torre», «Nivel» o «Piso» al pegar desde Excel o importar .xlsx; la exportación CSV/XLSX incluye las nuevas columnas.
+- Backend: el servidor valida y persiste los campos, los duplicados se calculan sobre el identificador combinado (la misma habitación en bloques distintos ya no es duplicado) y la auditoría registra cambios de bloque/planta.
+
 ## Envío directo a la Zebra con agente local (un clic) (13 de agosto de 2026)
 
 - Botón «Enviar a Zebra» en la vista de etiquetas: genera el ZPL y lo envía en un clic a la impresora por red.

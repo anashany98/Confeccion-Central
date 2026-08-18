@@ -14,8 +14,14 @@ PROJECT_LABELS = {
     "mode": "Número de hojas",
     "gather": "Fruncido general",
     "hem": "Bajo y cresta general",
+    "priceFabric": "Precio de tela",
+    "priceConfection": "Precio de confección",
+    "priceInstallation": "Precio de instalación",
+    "margin": "Margen",
 }
 ROW_LABELS = {
+    "block": "Bloque",
+    "floor": "Planta",
     "room": "Habitación",
     "width": "Ancho",
     "height": "Altura",
@@ -31,6 +37,14 @@ def _clean(value: Any) -> Any:
     if value == "":
         return None
     return value
+
+
+def _row_label(row: dict[str, Any]) -> str:
+    return " · ".join(
+        str(row.get(key, "")).strip()
+        for key in ("block", "floor", "room")
+        if str(row.get(key, "")).strip()
+    )
 
 
 def diff_states(before: dict[str, Any] | None, after: dict[str, Any]) -> list[dict[str, Any]]:
@@ -81,7 +95,7 @@ def diff_states(before: dict[str, Any] | None, after: dict[str, Any]) -> list[di
                 "action": "create",
                 "entity_type": "room",
                 "entity_id": row_id,
-                "summary": f"Habitación {row.get('room') or 'sin número'} añadida",
+                "summary": f"Habitación {_row_label(row) or 'sin identificar'} añadida",
                 "before": None,
                 "after": _row_snapshot(row),
             }
@@ -93,7 +107,7 @@ def diff_states(before: dict[str, Any] | None, after: dict[str, Any]) -> list[di
                 "action": "delete",
                 "entity_type": "room",
                 "entity_id": row_id,
-                "summary": f"Habitación {row.get('room') or 'sin número'} eliminada",
+                "summary": f"Habitación {_row_label(row) or 'sin identificar'} eliminada",
                 "before": _row_snapshot(row),
                 "after": None,
             }
@@ -106,7 +120,7 @@ def diff_states(before: dict[str, Any] | None, after: dict[str, Any]) -> list[di
             if old != new:
                 changes[label] = {"before": old, "after": new}
         if changes:
-            room = new_row.get("room") or old_row.get("room") or "sin número"
+            room = _row_label(new_row) or _row_label(old_row) or "sin identificar"
             names = ", ".join(changes.keys())
             events.append(
                 {

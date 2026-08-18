@@ -1,0 +1,1451 @@
+(() => {
+  'use strict';
+
+  const STORAGE_KEY='egea-hoja-confeccion-v4';
+  const LEGACY_KEY='egea-hoja-confeccion-v2';
+  const JOBS_KEY='egea-hoja-confeccion-jobs-v1';
+  const CUSTOM_TEMPLATES_KEY='egea-hoja-confeccion-templates-v1';
+  const q=(s,r=document)=>r.querySelector(s);
+  const qa=(s,r=document)=>[...r.querySelectorAll(s)];
+  const today=()=>new Date().toISOString().slice(0,10);
+  const nowText=()=>new Date().toLocaleString('es-ES',{dateStyle:'short',timeStyle:'short'});
+  // num, round, fmt y normalizeText viven en /static/logic.js (testeables en Node).
+  const money=v=>num(v).toLocaleString('es-ES',{style:'currency',currency:'EUR'});
+  const esc=s=>String(s??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+  const uid=()=>crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2);
+  const deepClone=o=>JSON.parse(JSON.stringify(o));
+  const safeFileName=v=>(String(v||'trabajo').trim().replace(/[\\/:*?"<>|]+/g,'-').replace(/\s+/g,'-').slice(0,80)||'trabajo');
+  // Identificador de un hueco: bloque · planta · habitación (según estén rellenos).
+  const rowLabel=(r)=>[String(r?.block??'').trim(),String(r?.floor??'').trim(),String(r?.room??'').trim()].filter(Boolean).join(' · ');
+  // Cabecera de la columna de identificación en las hojas: con Bloque y Planta activos pasa a «Identificador».
+  const idHeader=()=>state.project?.useBlockFloor?'Identificador':'Habitación';
+
+  const STATUS={
+    measured:{label:'Medida revisada',short:'Medida',rank:0},
+    cut:{label:'Cortada',short:'Cortada',rank:1},
+    sewn:{label:'Confeccionada',short:'Confecc.',rank:2},
+    installed:{label:'Instalada',short:'Instal.',rank:3}
+  };
+  const STATUS_OPTIONS=`<option value="">Sin estado</option>`+Object.entries(STATUS).map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('');
+
+  const blankRow=(p={})=>({
+    id:uid(),block:'',floor:'',room:'',width:'',height:'',gather:p.gather??2,hem:p.hem??.25,sheets:p.mode??2,
+    notes:'',status:'',converted:{},createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()
+  });
+  const defaultState=()=>({
+    version:4,jobId:uid(),activeView:'relacion',activeStep:1,
+    project:{mode:2,date:today(),hotel:'',client:'',seamstress:'',fabricType:'oscurante',fabricName:'',fabricWidth:2.8,confectionType:'FRUNCIDO',hooks:'centro',heightDiscount:.02,closureAdd:.06,railDeduction:.01,waste:5,ordered:0,priceConfection:0,priceFabric:0,priceInstallation:0,gather:2,hem:.25,margin:0,useBlockFloor:false},
+    rows:[],checks:{},configOpen:true,costsOpen:false,trash:[],activity:[],productionFilter:'all',cutSort:'height',labelFilter:'all',jobFilter:'active'
+  });
+
+  const BUILTIN_TEMPLATES=[
+    {id:'std2',name:'Cortina estándar · 2 hojas',description:'Configuración habitual para cortina fruncida de dos hojas.',values:{mode:2,gather:2,hem:.25,closureAdd:.06,fabricType:'oscurante',confectionType:'FRUNCIDO'}},
+    {id:'std1',name:'Cortina estándar · 1 hoja',description:'Una sola hoja con añadido de cierre reducido.',values:{mode:1,gather:2,hem:.25,closureAdd:.06,fabricType:'oscurante',confectionType:'FRUNCIDO'}},
+    {id:'visillo',name:'Visillo hotel · 2 hojas',description:'Fruncido más amplio y bajo ligero para visillos.',values:{mode:2,gather:2.5,hem:.2,closureAdd:.06,fabricType:'visillo',confectionType:'FRUNCIDO'}},
+    {id:'osc-hotel',name:'Oscurante hotel · 2 hojas',description:'Plantilla de producción para habitaciones de hotel.',values:{mode:2,gather:2,hem:.25,closureAdd:.06,fabricType:'oscurante',confectionType:'FRUNCIDO',heightDiscount:.02}},
+    {id:'recta',name:'Confección recta · 1 hoja',description:'Una hoja con fruncido 1,00 para panel o caída recta.',values:{mode:1,gather:1,hem:.25,closureAdd:.06,fabricType:'panel',confectionType:'RECTA'}}
+  ];
+
+  function normalizeState(raw){
+    const base=defaultState();
+    const out=Object.assign(base,raw||{});
+    out.project=Object.assign(base.project,raw?.project||{});
+    if(out.activeView==='rielesdobles')out.activeView='rieles'; // vista fusionada en v2.1
+    out.rows=(raw?.rows||[]).map(r=>Object.assign(blankRow(out.project),r,{id:r.id||uid(),notes:r.notes||'',status:STATUS[r.status]?r.status:'',converted:r.converted||{}}));
+    if(!out.rows.length)out.rows=Array.from({length:12},()=>blankRow(out.project));
+    out.trash=Array.isArray(out.trash)?out.trash:[];
+    out.activity=Array.isArray(out.activity)?out.activity:[];
+    return out;
+  }
+
+  function loadJobs(){
+    // Los datos empresariales se obtienen del servidor después del login.
+    // Se eliminan copias heredadas que podían quedar visibles para el siguiente usuario.
+    for(const key of [JOBS_KEY,STORAGE_KEY,LEGACY_KEY])localStorage.removeItem(key);
+    const s=normalizeState(defaultState());
+    const job={id:s.jobId||uid(),name:s.project.hotel||'Trabajo sin nombre',updatedAt:new Date().toISOString(),state:s,versions:[]};
+    s.jobId=job.id;
+    return {currentId:job.id,jobs:[job],others:[],othersLoaded:false};
+  }
+
+  let jobsData=loadJobs();
+  let jobScope='mine';          // pestaña del modal de trabajos: mine | others
+  let viewOnlyJobId=null;       // trabajo de un compañero abierto en solo lectura
+  let centralOthersLoader=null; // lo registra central.js tras el login
+  let fitWarningShown=false;    // evita repetir la alerta de tela (ancho/alto de corte vs ancho de tela)
+  autoCloseFinishedJobs(); // housekeeping silencioso al arrancar
+  // Vistas repintadas de forma selectiva (solo la activa o las "sucias").
+  const ALL_VIEWS=['relacion','confeccion','corte','resumen','revisar','rieles','produccion','etiquetas','checklist'];
+  const dirtyViews=new Set(ALL_VIEWS);
+  const markAllDirty=()=>ALL_VIEWS.forEach(v=>dirtyViews.add(v));
+  let state=normalizeState(jobsData.jobs.find(j=>j.id===jobsData.currentId)?.state||jobsData.jobs[0]?.state||defaultState());
+  state.jobId=jobsData.currentId||state.jobId;
+  let saveTimer=null;
+  let undoStack=[];
+  let redoStack=[];
+  let selectedIds=new Set();
+  let editStartSnapshot=null;
+  let editStartTarget=null;
+  let xlsxWorkbook=null;
+  let xlsxMatrix=[];
+  let xlsxFileName='';
+  let excelPasteResult=null;
+  let pendingChangeSource='manual';
+
+  function currentJob(){return jobsData.jobs.find(j=>j.id===state.jobId)}
+  function snapshot(){return JSON.stringify(state)}
+  function pushUndo(snap,label='Cambio',force=false){
+    if(!snap||(!force&&snap===snapshot()))return;
+    undoStack.push({state:snap,label});
+    if(undoStack.length>60)undoStack.shift();
+    redoStack=[];
+    updateUndoButtons();
+  }
+  function checkpoint(label='Cambio'){
+    pushUndo(snapshot(),label,true);
+    addActivity(label);
+  }
+  function addActivity(label){
+    state.activity.unshift({id:uid(),label,time:new Date().toISOString()});
+    state.activity=state.activity.slice(0,80);
+  }
+  function updateUndoButtons(){
+    const u=q('#undoBtn'),r=q('#redoBtn');
+    if(u)u.disabled=!undoStack.length;
+    if(r)r.disabled=!redoStack.length;
+  }
+  function undo(){
+    const item=undoStack.pop();if(!item)return;
+    redoStack.push({state:snapshot(),label:item.label});
+    state=normalizeState(JSON.parse(item.state));
+    selectedIds.clear();save();renderAll();toast(`Deshecho: ${item.label}`);updateUndoButtons();
+  }
+  function redo(){
+    const item=redoStack.pop();if(!item)return;
+    undoStack.push({state:snapshot(),label:item.label});
+    state=normalizeState(JSON.parse(item.state));
+    selectedIds.clear();save();renderAll();toast(`Rehecho: ${item.label}`);updateUndoButtons();
+  }
+  function persistNow(){
+    const job=currentJob();
+    if(job){
+      job.state=deepClone(state);
+      job.name=state.project.hotel?.trim()||job.name||'Trabajo sin nombre';
+      job.updatedAt=new Date().toISOString();
+    }
+    jobsData.currentId=state.jobId;
+    const source=pendingChangeSource;pendingChangeSource='manual';
+    window.dispatchEvent(new CustomEvent('egea:save',{detail:{state:deepClone(state),job:deepClone(job||{id:state.jobId,name:state.project.hotel||'Trabajo sin nombre',versions:[]}),source}}));
+  }
+  function save(silent=true,source='manual'){
+    pendingChangeSource=source;
+    // Cualquier cambio de datos deja "sucias" las vistas ocultas para que se
+    // repinten antes de volver a mostrarse (render selectivo).
+    ALL_VIEWS.forEach(v=>{if(v!==state.activeView)dirtyViews.add(v)});
+    clearTimeout(saveTimer);
+    saveTimer=setTimeout(()=>{persistNow();if(!silent)toast('Trabajo guardado')},100);
+  }
+  function saveVersion(label='Versión manual'){
+    persistNow();
+    const job=currentJob();if(!job)return;
+    job.versions=job.versions||[];
+    job.versions.unshift({id:uid(),label,time:new Date().toISOString(),state:deepClone(state)});
+    job.versions=job.versions.slice(0,20);
+    addActivity(label);save();toast('Versión guardada');
+  }
+  function restoreVersion(jobId,versionId){
+    const job=jobsData.jobs.find(j=>j.id===jobId),v=job?.versions?.find(x=>x.id===versionId);if(!v)return;
+    checkpoint('Restaurar versión');
+    state=normalizeState(deepClone(v.state));state.jobId=jobId;selectedIds.clear();save();renderAll();closeModal('historyModal');toast('Versión restaurada');
+  }
+  function toast(text,bad=false){
+    const e=document.createElement('div');e.className='toast'+(bad?' bad':'');e.textContent=text;q('#toasts').append(e);setTimeout(()=>e.remove(),2800)
+  }
+  function openModal(id){q('#'+id)?.classList.add('open')}
+  function closeModal(id){q('#'+id)?.classList.remove('open')}
+  function formatDate(v){if(!v)return'';const [y,m,d]=String(v).split('-');return d&&m&&y?`${d}/${m}/${y}`:v}
+
+  /* === Diálogo nativo de la app: sustituye a confirm() y prompt() === */
+  let askResolver=null;
+  function askDialog(opts={}){
+    const {title='Confirmar',message='',confirmLabel='Confirmar',cancelLabel='Cancelar',danger=false,input=null,textarea=null,required=false,onConfirm=null}=opts;
+    const modal=q('#askModal');if(!modal)return Promise.resolve(null);
+    q('#askTitle').textContent=title;
+    q('#askMessage').textContent=message;
+    const inputWrap=q('#askInputWrap'),areaWrap=q('#askTextareaWrap');
+    inputWrap.hidden=!input;areaWrap.hidden=!textarea;
+    q('#askConfirmBtn').textContent=confirmLabel;
+    q('#askCancelBtn').textContent=cancelLabel;
+    q('#askConfirmBtn').classList.toggle('danger',danger);
+    let field=null;
+    if(input){q('#askInputLabel').textContent=input.label||'Valor';field=q('#askInput');field.type=input.type||'text';field.value=input.value||'';field.placeholder=input.placeholder||''}
+    if(textarea){q('#askTextareaLabel').textContent=textarea.label||'Motivo';field=q('#askTextarea');field.value=textarea.value||'';q('#askRequiredHint').hidden=!required}
+    const finish=(value)=>{modal.classList.remove('open');document.removeEventListener('keydown',onKey,true);askResolver=null;if(onConfirm)value=onConfirm(value);return value};
+    const onKey=(e)=>{
+      if(e.key==='Escape'){e.stopPropagation();e.preventDefault();resolveAsk(null);return}
+      if(e.key==='Tab'){ // focus trap sencillo dentro del modal
+        const f=[...modal.querySelectorAll('button,input,textarea,select')].filter(x=>!x.disabled&&x.offsetParent!==null);
+        if(!f.length)return;const first=f[0],last=f[f.length-1];
+        if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
+        else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
+      }
+      if(e.key==='Enter'&&field&&field.tagName!=='TEXTAREA'&&!e.defaultPrevented){e.preventDefault();commit()}
+    };
+    function commit(){
+      let value=true;
+      if(field){value=field.value.trim();if(required&&!value){q('#askRequiredHint').hidden=false;field.focus();return}}
+      resolveAsk(finish(value));
+    }
+    function resolveAsk(v){const r=askResolver;askResolver=null;if(r)r(v)}
+    q('#askConfirmBtn').onclick=commit;
+    q('#askCancelBtn').onclick=()=>{modal.classList.remove('open');document.removeEventListener('keydown',onKey,true);resolveAsk(null)};
+    document.addEventListener('keydown',onKey,true);
+    modal.classList.add('open');
+    setTimeout(()=>(field||q('#askConfirmBtn')).focus(),60);
+    return new Promise(res=>{askResolver=res});
+  }
+  const askConfirm=(opts={})=>askDialog({confirmLabel:opts.confirmLabel||(opts.danger?'Eliminar':'Confirmar'),...opts});
+  const askText=(opts={})=>askDialog(opts);
+
+  /* === Estados vacíos con acción === */
+  const emptyState=({icon='▥',title='Sin datos',text='',actions=[]})=>`<div class="empty-state"><div class="empty-icon" aria-hidden="true">${icon}</div><h3>${esc(title)}</h3><p>${esc(text)}</p>${actions.length?`<div class="empty-actions">${actions.map(a=>`<button class="btn ${a.primary?'primary':''}" ${a.gotoView?`data-goto-view="${a.gotoView}"`:''} ${a.action?`data-empty-action="${a.action}"`:''}>${esc(a.label)}</button>`).join('')}</div>`:''}</div>`;
+  const debounce=(fn,ms=150)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}};
+  const searchProduction=debounce(()=>renderProduction(),150);
+  const searchLabels=debounce(()=>renderLabels(),150);
+  const searchCuts=debounce(()=>{renderCutTable();renderCutSummary()},150);
+  function hasData(r){return rowLabel(r)!==''||num(r.width)!==0||num(r.height)!==0||String(r.notes||'').trim()!==''}
+  function readyRows(){return state.rows.filter(r=>rowLabel(r)!==''&&num(r.width)>0&&num(r.height)>0)}
+  function dataRows(){return state.rows.filter(hasData)}
+
+  // parseDimension y la lógica de calcRow viven en /static/logic.js; aquí se
+  // envuelven para inyectar el proyecto actual.
+  function calcRow(r){return calcRowFor(r,state.project)}
+  function totals(){return readyRows().reduce((a,r)=>{const c=calcRow(r);for(const k of ['meters','metersBase','fabricCost','confectionCost','installationCost','base','benefit','total'])a[k]+=c[k];return a},{meters:0,metersBase:0,fabricCost:0,confectionCost:0,installationCost:0,base:0,benefit:0,total:0})}
+
+  function validateAll(){
+    const bf=!!state.project.useBlockFloor,rowId=r=>normalizeText(bf?rowLabel(r):String(r.room??'').trim());
+    const counts=new Map();
+    dataRows().forEach(r=>{const id=rowId(r);if(id)counts.set(id,(counts.get(id)||0)+1)});
+    const duplicateRooms=new Set([...counts].filter(([,c])=>c>1).map(([k])=>k));
+    const map=new Map();let errors=0,warnings=0,converted=0,complete=0;
+    const fabricWidth=num(state.project.fabricWidth);
+    state.rows.forEach(r=>{
+      const issues=[];if(!hasData(r)){map.set(r.id,{issues,level:'empty'});return}
+      const c=calcRow(r),id=rowId(r);
+      if(!id)issues.push({level:'error',text:bf?'Falta el identificador (habitación, bloque o planta)':'Falta la habitación'});
+      if(id&&duplicateRooms.has(id))issues.push({level:'error',text:'Identificador duplicado'});
+      if(c.width<=0)issues.push({level:'error',text:'Falta el ancho'});else if(c.width>10)issues.push({level:'warning',text:'Ancho superior a 10 m'});
+      if(c.height<=0)issues.push({level:'error',text:'Falta la altura'});else if(c.height>6)issues.push({level:'warning',text:'Altura superior a 6 m'});
+      if(fabricWidth>0&&c.cutHeight>0&&c.cutHeight>fabricWidth-0.1)issues.push({level:'warning',text:c.cutHeight>fabricWidth?`Alto de corte ${fmt(c.cutHeight)} m excede el ancho de tela (${fmt(fabricWidth)} m)`:`Alto de corte ${fmt(c.cutHeight)} m a menos de 10 cm del ancho de tela (${fmt(fabricWidth)} m)`});
+      if(c.gather<1||c.gather>3)issues.push({level:'warning',text:'Fruncido fuera de 1,00–3,00'});
+      if(c.sheets<1||c.sheets>10||!Number.isInteger(c.sheets))issues.push({level:'error',text:'Número de hojas incorrecto'});
+      const conv=Object.keys(r.converted||{}).length;if(conv)converted++;
+      const e=issues.filter(x=>x.level==='error').length,w=issues.filter(x=>x.level==='warning').length;errors+=e;warnings+=w;if(!e&&!w)complete++;
+      map.set(r.id,{issues,level:e?'error':w?'warning':'complete',converted:conv,duplicate:id&&duplicateRooms.has(id)});
+    });
+    return {map,errors,warnings,converted,complete,duplicateRooms,total:dataRows().length};
+  }
+
+  const PROJECT_INPUTS={
+    'p-date':'date','p-hotel':'hotel','p-client':'client','p-seamstress':'seamstress','p-fabricType':'fabricType','p-fabricName':'fabricName','p-fabricWidth':'fabricWidth','p-confectionType':'confectionType','p-closureAdd':'closureAdd','p-hooks':'hooks','p-heightDiscount':'heightDiscount','p-railDeduction':'railDeduction','p-waste':'waste','p-ordered':'ordered','p-useBlockFloor':'useBlockFloor','d-priceConfection':'priceConfection','d-priceFabric':'priceFabric','d-priceInstallation':'priceInstallation','d-gather':'gather','d-hem':'hem','d-margin':'margin'
+  };
+  // Añadido de cierre configurable (0,06 u 0,15 m) en la vista de confección; FIXED_CLOSURE_ADD (0,06 m) es el valor por defecto en /static/logic.js.
+  const EDITABLE_KEYS=['block','floor','room','width','height','gather','hem','sheets','notes'];
+  const NUMERIC_KEYS=new Set(['width','height','gather','hem','sheets']);
+
+  function bindProjectInputs(){
+    for(const [id,key] of Object.entries(PROJECT_INPUTS)){
+      const el=q('#'+id);if(!el)continue;
+      el.dataset.project=key;
+      el.addEventListener('input',()=>{
+        state.project[key]=el.type==='checkbox'?el.checked:(el.type==='number'||el.tagName==='SELECT'?num(el.value):el.value);
+        save();renderDependent(false);
+      });
+      // El check de Bloque/Planta cambia la estructura de la tabla: re-render completo.
+      if(el.type==='checkbox')el.addEventListener('change',()=>{state.project[key]=el.checked;save();syncBlockFloorUI()});
+      el.addEventListener('blur',()=>finishEdit(`Cambiar ${el.closest('label')?.querySelector('span')?.textContent||key}`));
+    }
+  }
+  // Aplica automáticamente el valor de los inputs superiores (fruncido, bajo y cresta)
+  // a todas las filas cuando el usuario confirma el cambio (Tab / Enter / blur).
+  function bindConfectionDefaultsApply(){
+    const applyToAll=key=>{
+      if(!state.rows.length)return;
+      const value=state.project[key];
+      let count=0;
+      for(const r of state.rows){
+        if(r[key]===value)continue; // evita render extra si nada cambia
+        r[key]=value;r.updatedAt=new Date().toISOString();count++;
+      }
+      if(!count)return;
+      save();renderDependent(true);
+      const label=key==='gather'?'fruncido':'bajo y cresta';
+      toast(`${label} aplicado a ${count} fila${count===1?'':'s'}`);
+    };
+    for(const [id,key] of [['d-gather','gather'],['d-hem','hem']]){
+      const el=q('#'+id);if(!el)continue;
+      el.addEventListener('change',()=>applyToAll(key));
+    }
+  }
+  function syncInputs(){
+    for(const [id,key] of Object.entries(PROJECT_INPUTS)){const el=q('#'+id);if(el&&document.activeElement!==el){if(el.type==='checkbox')el.checked=!!state.project[key];else el.value=state.project[key]??''}}
+    q('.mapping-grid')?.classList.toggle('no-bf',!state.project.useBlockFloor);
+    qa('.mode-switch button').forEach(b=>b.classList.toggle('active',Number(b.dataset.mode)===state.project.mode));
+    q('#configCard')?.classList.toggle('hide',!state.configOpen);if(q('#configToggle'))q('#configToggle').textContent=state.configOpen?'Ocultar configuración':'Mostrar configuración';
+    q('#costBody')?.classList.toggle('hide',!state.costsOpen);if(q('#costToggle'))q('#costToggle').textContent=state.costsOpen?'Ocultar costes':'Mostrar costes';
+  }
+  function syncBlockFloorUI(){
+    q('.mapping-grid')?.classList.toggle('no-bf',!state.project.useBlockFloor);
+    renderAll();
+  }
+  function beginEdit(target){
+    if(editStartTarget===target)return;
+    editStartSnapshot=snapshot();editStartTarget=target;
+  }
+  function finishEdit(label='Editar datos'){
+    if(editStartSnapshot&&editStartSnapshot!==snapshot())pushUndo(editStartSnapshot,label);
+    editStartSnapshot=null;editStartTarget=null;
+  }
+  function setMode(mode){
+    // Solo cambia el valor por defecto. Para aplicarlo a las filas existentes
+    // está el botón «Aplicar también a Nº hojas» (evita mutaciones silenciosas).
+    checkpoint('Cambiar número de hojas por defecto');
+    mode=Number(mode)===1?1:2;state.project.mode=mode;
+    save();renderAll();toast(`Hojas por defecto: ${mode}`);
+  }
+
+  function renderKpis(){
+    const rows=readyRows(),t=totals(),panels=rows.reduce((a,r)=>a+calcRow(r).sheets,0),v=validateAll();
+    q('#kpis').innerHTML=[['Huecos',rows.length],['Paños totales',panels],['Metros de tela',fmt(t.meters)+' m'],['Medidas de corte',groupedCuts().length],['Incidencias',v.errors+v.warnings]].map((x,i)=>`<div class="kpi ${i===2?'accent':''}"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('');
+    const badge=q('[data-view="produccion"] .badge');if(badge)badge.textContent=rows.filter(r=>r.status!=='installed').length;
+  }
+  function renderCostKpis(){const t=totals();q('#costKpis').innerHTML=[['Coste tela',money(t.fabricCost)],['Confección',money(t.confectionCost)],['Instalación',money(t.installationCost)],['Beneficio',money(t.benefit)],['Total',money(t.total)]].map((x,i)=>`<div class="kpi ${i===4?'accent':''}"><span>${x[0]}</span><strong>${x[1]}</strong></div>`).join('')}
+  function renderValidationBar(){
+    const v=validateAll(),bar=q('#validationBar');if(!bar)return;
+    // Alerta única cuando un ancho o alto de corte no cabe en el ancho de tela.
+    const fabricIssues=[...v.map.values()].flatMap(val=>val?val.issues.map(x=>x.text).filter(t=>t.includes('ancho de tela')):[]);
+    if(fabricIssues.length&&!fitWarningShown){fitWarningShown=true;toast(`Alerta: ${fabricIssues[0]} — revise la fila`,true);}
+    else if(!fabricIssues.length)fitWarningShown=false;
+    const level=v.errors?'bad':v.warnings?'warn':'good';
+    bar.className='validation-bar '+level;
+    bar.innerHTML=v.total?`<b>${v.errors||v.warnings?'Revisión automática':'Datos preparados'}</b><span class="validation-chip">${v.complete} completas</span>${v.errors?`<button type="button" class="validation-chip" data-goto-issue="error" title="Ir al primer error">${v.errors} errores</button>`:''}${v.warnings?`<button type="button" class="validation-chip" data-goto-issue="warning" title="Ir al primer aviso">${v.warnings} avisos</button>`:''}${v.duplicateRooms.size?`<button type="button" class="validation-chip" data-goto-issue="duplicate" title="Ir a la primera habitación duplicada">duplicadas</button>`:''}${v.converted?`<span class="validation-chip">${v.converted} convertidas de cm/mm</span>`:''}<span>Pulse un aviso para ir a la fila afectada.</span>`:'<b>Introduzca o importe las habitaciones y medidas.</b>';
+  }
+  function goToIssue(level){
+    const v=validateAll();
+    let target=null;
+    for(const r of state.rows){
+      const val=v.map.get(r.id);if(!val||!val.issues.length&&!val.duplicate)continue;
+      if(level==='duplicate'&&val.duplicate){target=r.id;break}
+      if(level==='error'&&val.issues.some(x=>x.level==='error')){target=r.id;break}
+      if(level==='warning'&&val.issues.some(x=>x.level==='warning')){target=r.id;break}
+    }
+    if(!target){toast('No hay filas con ese aviso');return}
+    const tr=q(`#relationTable tbody tr[data-id="${target}"]`);
+    if(!tr){q('#rowSearch').value='';renderRelation();return goToIssue(level)}
+    tr.scrollIntoView({behavior:'smooth',block:'center'});
+    tr.classList.remove('row-flash');void tr.offsetWidth;tr.classList.add('row-flash');
+    tr.querySelector('input')?.focus({preventScroll:true});
+  }
+  function rowInput(r,key,type='number',step='.01',extra='',classes=''){
+    const v=r[key]??'',dimension=['width','height','hem'].includes(key),actualType=dimension?'text':type;
+    const converted=r.converted?.[key]?' converted':'';
+    const invalid=(classes==='invalid'||classes==='incomplete'||classes==='duplicate')?' aria-invalid="true"':'';
+    return `<input class="cell-input ${classes}${converted}" data-row="${r.id}" data-key="${key}" type="${actualType}" ${actualType==='number'?`step="${step}"`:dimension?'inputmode="decimal"':''} value="${esc(v)}" ${extra}${invalid} title="${r.converted?.[key]?`Convertido automáticamente desde ${esc(r.converted[key])}`:''}">`;
+  }
+  function inputState(r,key,validation){
+    if(!hasData(r))return'';
+    if(validation?.duplicate&&['block','floor','room'].includes(key))return'duplicate';
+    if(NUMERIC_KEYS.has(key)&&num(r[key])<0)return'invalid';
+    if(['block','floor','room'].includes(key)){
+      const id=state.project.useBlockFloor?rowLabel(r):String(r.room??'').trim();
+      if(!id)return'incomplete';
+    }
+    if((key==='width'||key==='height')&&num(r[key])<=0)return'incomplete';
+    return'';
+  }
+  function rowClass(r,val){
+    const s=r.status||'';return `${val.level==='error'?'incomplete ':val.level==='warning'?'incomplete ':val.level==='complete'?'complete ':''}${val.duplicate?'duplicate ':''}status-${s}`.trim();
+  }
+  // Refresco visual en caliente de una fila sin re-renderizar toda la tabla
+  // (conserva el foco del input mientras se escribe).
+  function syncRowVisual(r,tr){
+    if(!tr)return;
+    const val=validateAll().map.get(r.id)||{issues:[],level:'empty',duplicate:false};
+    tr.className=rowClass(r,val);
+    tr.querySelectorAll('input[data-key]').forEach(inp=>{
+      const key=inp.dataset.key,st=inputState(r,key,val);
+      inp.className=`cell-input ${st}${r.converted?.[key]?' converted':''}`.trim();
+      if(st==='invalid'||st==='incomplete'||st==='duplicate')inp.setAttribute('aria-invalid','true');else inp.removeAttribute('aria-invalid');
+    });
+  }
+  function renderRelation(){
+    const bf=!!state.project.useBlockFloor,query=q('#rowSearch')?.value.trim().toLowerCase()||'',tbody=q('#relationTable tbody'),validation=validateAll();
+    // Cabecera dinámica: Bloque y Planta solo cuando el check está activo.
+    const thead=q('#relationTable thead');
+    if(thead)thead.innerHTML=`<tr><th><input id="selectAllRows" class="row-check" type="checkbox" title="Seleccionar filas"></th>${bf?'<th title="Bloque o torre (México / Caribe)">Bloque</th><th title="Planta o nivel (México / Caribe)">Planta</th>':''}<th>Habitación</th><th>Ancho hueco<br>(m)</th><th>Altura<br>(m)</th><th>Fruncido</th><th>Bajo y<br>cresta</th><th>Nº<br>hojas</th><th>Medida por<br>hoja (m)</th><th>Metros tela<br>(m)</th><th>Observaciones</th><th></th></tr>`;
+    tbody.innerHTML=state.rows.map((r,i)=>{
+      if(query&&!rowLabel(r).toLowerCase().includes(query))return'';
+      const c=calcRow(r),v=validation.map.get(r.id)||{issues:[],level:'empty'};
+      const issueText=v.issues.map(x=>x.text).join(' · '),alert=v.issues.length?`<span class="row-alert ${v.level==='warning'?'info':''}" title="${esc(issueText)}">${v.level==='error'?'!':'i'}</span>`:'';
+      const bfCells=bf?`<td class="editable">${rowInput(r,'block','text','.01','',inputState(r,'block',v))}</td><td class="editable">${rowInput(r,'floor','text','.01','',inputState(r,'floor',v))}</td>`:'';
+      return `<tr data-id="${r.id}" class="${rowClass(r,v)}"><td><div class="row-index"><input class="row-check" type="checkbox" data-select-row="${r.id}" ${selectedIds.has(r.id)?'checked':''}>${alert}<span>${i+1}</span></div></td>${bfCells}<td class="editable">${rowInput(r,'room','text','.01','',inputState(r,'room',v))}</td><td class="editable">${rowInput(r,'width','text','.01','',inputState(r,'width',v))}</td><td class="editable">${rowInput(r,'height','text','.01','',inputState(r,'height',v))}</td><td class="editable">${rowInput(r,'gather','number','.01','min="0"',inputState(r,'gather',v))}</td><td class="editable">${rowInput(r,'hem','text','.01','',inputState(r,'hem',v))}</td><td class="editable">${rowInput(r,'sheets','number','1','min="1" max="10"',inputState(r,'sheets',v))}</td><td class="calculated calc" title="Ancho de tela por hoja">${fmt(c.measurePerSheet)}</td><td class="calculated calc" title="Metros totales de tela">${fmt(c.meters)}</td><td class="editable notes">${rowInput(r,'notes','text','.01','','')}</td><td class="actions"><div class="actions-menu"><button type="button" class="status-dot ${r.status}" data-cycle-status="${r.id}" title="Estado: ${STATUS[r.status]?.label||'sin estado'} — clic para cambiar" aria-label="Cambiar estado de la fila ${i+1}"></button><button class="btn small icon" data-row-action="duplicate" data-id="${r.id}" title="Duplicar fila" aria-label="Duplicar fila">⧉</button><button class="btn small icon danger" data-row-action="delete" data-id="${r.id}" title="Enviar a papelera" aria-label="Enviar fila a papelera">×</button></div></td></tr>`;
+    }).join('');
+    const t=totals();q('#relationTable tfoot').innerHTML=`<tr><td colspan="${7+(bf?2:0)}" class="total-label">TOTAL METROS DE TELA</td><td></td><td class="total-meters">${fmt(t.meters)} m</td><td colspan="2"></td></tr>`;
+    const selectAll=q('#selectAllRows');if(selectAll){const visible=qa('[data-select-row]');selectAll.checked=visible.length>0&&visible.every(x=>x.checked);selectAll.indeterminate=visible.some(x=>x.checked)&&!selectAll.checked}
+    renderBulkBar();renderValidationBar();
+  }
+  function renderBulkBar(){
+    const bar=q('#bulkBar');if(!bar)return;
+    const selected=state.rows.filter(r=>selectedIds.has(r.id));
+    bar.classList.toggle('open',selected.length>0);
+    bar.innerHTML=selected.length?`<strong>${selected.length} fila${selected.length===1?'':'s'} seleccionada${selected.length===1?'':'s'}</strong><input id="bulkGather" inputmode="decimal" placeholder="Fruncido"><input id="bulkHem" inputmode="decimal" placeholder="Bajo (m)"><input id="bulkSheets" inputmode="numeric" placeholder="Hojas"><select id="bulkStatus">${STATUS_OPTIONS}</select><button class="btn small primary" id="bulkApplyBtn">Aplicar</button><button class="btn small" id="bulkCopyBtn">Copiar a Excel</button><button class="btn small" id="bulkDuplicateBtn">Duplicar</button><button class="btn small danger" id="bulkDeleteBtn">Papelera</button><button class="btn small" id="bulkClearBtn">Cancelar</button>`:'';
+    if(selected.length){q('#bulkStatus').value=''}
+  }
+
+  function renderRelationPrint(){
+    const rows=readyRows(),chunks=[];for(let i=0;i<rows.length;i+=28)chunks.push(rows.slice(i,i+28));if(!chunks.length)chunks.push([]);
+    q('#relationPrint').innerHTML=chunks.map((chunk,page)=>{
+      const body=chunk.map((r,i)=>{const c=calcRow(r);return `<tr><td>${page*28+i+1}</td><td class="left"><b>${esc(rowLabel(r))}</b></td><td>${fmt(c.width)}</td><td>${fmt(c.height)}</td><td>${fmt(c.gather)}</td><td>${fmt(num(r.hem))}</td><td>${c.sheets}</td><td class="calc-cell">${fmt(c.measurePerSheet)}</td><td class="calc-cell"><b>${fmt(c.meters)}</b></td><td class="left">${esc(r.notes||'')}</td></tr>`}).join('');
+      const pageTotal=chunk.reduce((a,r)=>a+calcRow(r).meters,0);
+      return `<article class="paper landscape landscape-page excel-relation-page"><h2 class="paper-title">RELACIÓN DE HUECOS</h2><div class="excel-title-grid"><div class="excel-box"><b>TELA</b><span>${esc(state.project.fabricType)}</span></div><div class="excel-box"><b>MEDIDA</b><span>${fmt(state.project.fabricWidth)} m</span></div><div class="excel-box"><b>FECHA</b><span>${esc(formatDate(state.project.date))}</span></div><div class="excel-box"><b>OBRA / HOTEL</b><span>${esc(state.project.hotel)}</span></div><div class="excel-box"><b>NOMBRE TELA</b><span>${esc(state.project.fabricName)}</span></div><div class="excel-box"><b>CONFECCIÓN</b><span>${esc(state.project.confectionType)}</span></div><div class="excel-box"><b>CLIENTE</b><span>${esc(state.project.client)}</span></div><div class="excel-box"><b>HOJAS</b><span>${state.project.mode}</span></div></div><table class="excel-table"><thead><tr><th style="width:4%">#</th><th style="width:14%">${idHeader()}</th><th style="width:9%">Ancho hueco</th><th style="width:8%">Altura</th><th style="width:8%">Fruncido</th><th style="width:9%">Bajo y cresta</th><th style="width:7%">Nº hojas</th><th style="width:11%">Medida por hoja</th><th style="width:10%">Mts de tela</th><th>Observaciones</th></tr></thead><tbody>${body||`<tr><td colspan="10" style="height:42px">No hay habitaciones cumplimentadas.</td></tr>`}</tbody><tfoot><tr><td colspan="8" style="text-align:right">TOTAL PÁGINA</td><td>${fmt(pageTotal)} m</td><td>Página ${page+1}/${chunks.length}</td></tr></tfoot></table></article>`;
+    }).join('');
+  }
+  function rowsForPrint(){const term=(q('#confectionSearch')?.value||'').trim().toLowerCase();return readyRows().filter(r=>!term||rowLabel(r).toLowerCase().includes(term))}
+  function paperHeader(title='HOJA DE CONFECCIÓN'){const p=state.project;return `<div class="pdf-source"><span class="pdf-hotel">${esc(p.hotel||'')}</span><span class="pdf-date">${esc(formatDate(p.date))}</span></div><h2 class="paper-title">${title}</h2><div class="paper-head"><div class="paper-field"><b>OBRA</b>${esc(p.hotel||'')}</div><div class="paper-field"><b>FECHA</b>${esc(formatDate(p.date))}</div></div>`}
+  function renderConfection(){
+    const sourceRows=rowsForPrint();
+    if(!readyRows().length){q('#confectionPages').innerHTML=emptyState({icon:'✂',title:'Sin hojas de confección',text:'Las hojas se generan automáticamente a partir de la relación de huecos, en grupos de seis habitaciones.',actions:[{label:'Ir a Datos y huecos',gotoView:'relacion',primary:true}]});return}
+    // 1 fila por habitación (unificada). Aunque la habitación tenga 2 paños, la fila es única.
+    const chunks=[];for(let i=0;i<sourceRows.length;i+=8)chunks.push(sourceRows.slice(i,i+8));if(!chunks.length)chunks.push([]);
+    q('#confectionPages').innerHTML=chunks.map((chunk,idx)=>{
+      let total=0;
+      const lines=chunk.map(r=>{
+        const c=calcRow(r);
+        total+=c.sheetMeters;
+        // La hoja de confección va SIN fruncido: ancho terminado de cada paño
+        // (ancho/hojas + cierre). 2 columnas si hay 2 hojas; con hoja única «Ancho 2» queda vacía.
+        const cut2 = c.sheets > 1 ? `<td class="key-cut">${fmt(c.sheetWidth)}</td>` : '<td></td>';
+        return `<tr><td class="left"><b>${esc(rowLabel(r))}</b></td><td class="key-cut">${fmt(c.sheetWidth)}</td>${cut2}<td>${fmt(c.cutHeight)}</td><td><b>${fmt(c.gather)}</b></td><td>${c.sheets}</td><td>${esc(state.project.fabricType)}</td><td>${fmt(c.sheetMetersPerSheet)}</td><td class="key-cut"><b>${fmt(c.sheetMeters)}</b></td><td class="checkbox-cell"></td></tr>`;
+      }).join('');
+      const fillers=Array.from({length:Math.max(0,8-chunk.length)},()=>'<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td class="checkbox-cell"></td></tr>').join('');
+      const totalLabel=sourceRows.reduce((a,x)=>a+calcRow(x).sheetMeters,0);
+      return `<article class="paper confection-page">${paperHeader()}<div class="paper-sub"><span><b>Descuento altura:</b> ${fmt(state.project.heightDiscount)} m</span><span><b>Confección:</b> ${esc(state.project.confectionType)}</span><span><b>Garfios:</b> ${esc(state.project.hooks)}</span><span><b>Añadido cierre:</b> ${fmt(num(state.project.closureAdd)||FIXED_CLOSURE_ADD)} m</span></div><table class="paper-table confection-table"><thead><tr><th>${idHeader()}</th><th>Ancho 1</th><th>Ancho 2</th><th>Alto corte</th><th>Fruncido</th><th>Hojas</th><th>Tela</th><th>m/hoja</th><th>Suma m</th><th>✓</th></tr></thead><tbody>${lines}${fillers}<tr class="paper-total"><td colspan="8" style="text-align:right">TOTAL m (esta página)</td><td>${fmt(total)}</td><td></td></tr><tr class="paper-grand-total"><td colspan="8" style="text-align:right">TOTAL GENERAL</td><td>${fmt(totalLabel)}</td><td></td></tr></tbody></table><div class="paper-footer"><div class="paper-line"><b>Cliente:</b>${esc(state.project.client)}</div><div class="paper-line"><b>Fecha:</b>${esc(formatDate(state.project.date))}</div><div class="paper-line"><b>Costurera:</b>${esc(state.project.seamstress)}</div><div class="paper-line"><b>Firma operario:</b></div></div><div class="paper-meta"><div><b>Confección</b><br>${esc(state.project.confectionType)}</div><div><b>Garfios</b><br>${esc(state.project.hooks)}</div><div><b>Tela</b><br>${esc(state.project.fabricName)} · ${fmt(totalLabel)} m</div></div><div style="text-align:right;margin-top:8px;font-size:8pt;color:#555">Página ${idx+1} de ${chunks.length}</div></article>`;
+    }).join('');
+  }
+
+  function cutRows(){return readyRows().map(r=>({r,c:calcRow(r)}))}
+  function cutKey(c){return `${c.cutWidth.toFixed(3)}|${c.cutHeight.toFixed(3)}`}
+  function groupedCuts(){
+    const m=new Map;
+    for(const {r,c} of cutRows()){
+      const key=cutKey(c);
+      if(!m.has(key))m.set(key,{key,width:c.cutWidth,height:c.cutHeight,gather:c.gather,rooms:[],rowIds:[],windows:0,cuts:0,meters:0});
+      const g=m.get(key);g.rooms.push(rowLabel(r));g.rowIds.push(r.id);g.windows++;g.cuts+=c.sheets;g.meters+=c.meters;
+    }
+    let groups=[...m.values()];
+    const search=(q('#cutSearch')?.value||'').trim().toLowerCase();if(search)groups=groups.filter(g=>g.rooms.some(r=>String(r).toLowerCase().includes(search)));
+    const sort=q('#cutSort')?.value||state.cutSort||'height';state.cutSort=sort;
+    groups.sort(sort==='width'?(a,b)=>b.width-a.width||b.height-a.height:sort==='quantity'?(a,b)=>b.cuts-a.cuts||b.height-a.height:sort==='room'?(a,b)=>String(a.rooms[0]).localeCompare(String(b.rooms[0]),'es',{numeric:true}):(a,b)=>b.height-a.height||b.width-a.width||b.cuts-a.cuts);
+    return groups;
+  }
+  function allGroupedCuts(){
+    const m=new Map;for(const {r,c} of cutRows()){const key=cutKey(c);if(!m.has(key))m.set(key,{key,width:c.cutWidth,height:c.cutHeight,gather:c.gather,rooms:[],rowIds:[],windows:0,cuts:0,meters:0});const g=m.get(key);g.rooms.push(rowLabel(r));g.rowIds.push(r.id);g.windows++;g.cuts+=c.sheets;g.meters+=c.meters}return [...m.values()].sort((a,b)=>b.height-a.height||b.width-a.width||b.cuts-a.cuts)
+  }
+  function renderCutTable(){
+    if(q('#cutSort'))q('#cutSort').value=state.cutSort||'height';
+    const rows=cutRows();
+    if(!rows.length){q('#cutTable').innerHTML=emptyState({icon:'▦',title:'Todavía no hay huecos',text:'Complete la relación de huecos con habitaciones y medidas para generar el cuadrante de corte.',actions:[{label:'Ir a Datos y huecos',gotoView:'relacion',primary:true}]});return}
+    const sort=q('#cutSort')?.value||state.cutSort||'height';state.cutSort=sort;
+    const search=(q('#cutSearch')?.value||'').trim().toLowerCase();
+    const filteredRows=search?rows.filter(({r})=>rowLabel(r).toLowerCase().includes(search)):rows;
+    // Vista "por medida" (agrupada por cutKey)
+    const grouped=new Map();
+    filteredRows.forEach(({r,c})=>{
+      const k=cutKey(c);
+      if(!grouped.has(k))grouped.set(k,{key:k,cuts:[],rooms:[],rowIds:[],c,total:0});
+      const g=grouped.get(k);
+      g.cuts.push(c);g.rooms.push(rowLabel(r));g.rowIds.push(r.id);
+    });
+    const sortGroups=(a,b)=>{
+      if(sort==='width')return b.c.cutWidth-a.c.cutWidth||b.c.cutHeight-a.c.cutHeight;
+      if(sort==='quantity')return b.cuts.length-a.cuts.length||b.c.cutHeight-a.c.cutHeight;
+      if(sort==='room')return String(a.rooms[0]||'').localeCompare(String(b.rooms[0]||''),'es',{numeric:true});
+      return b.c.cutHeight-a.c.cutHeight||b.c.cutWidth-a.c.cutWidth;
+    };
+    const groups=[...grouped.values()].sort(sortGroups);
+    const totalMeters=filteredRows.reduce((a,x)=>a+x.c.meters,0);
+    const totalSheets=filteredRows.reduce((a,x)=>a+x.c.sheets,0);
+    const activeView=q('.cut-tab.active')?.dataset.cutView||'detail';
+    // «Alto corte» redondeado al múltiplo de 3 cm más cercano, igual que el corte por paño.
+    const detailRow=({r,c})=>`<tr><td class="room">${esc(rowLabel(r))}</td><td class="dim">${fmt(c.width)} × ${fmt(c.height)}</td><td class="dim">${fmt(c.cutHeight)}</td><td class="key-cut">${fmt(c.cutWidth)} × ${fmt(c.cutHeight)} m</td><td class="num"><b>${fmt(c.gather)}</b></td><td><span class="cut-badge">${c.sheets}</span></td><td class="dim num">${fmt(c.metersPerSheet)}</td><td class="num"><b>${fmt(c.meters)}</b></td></tr>`;
+    const detailTable=`<table class="simple-table cut-detail-table">
+      <thead>
+        <tr>
+          <th>${idHeader()}</th>
+          <th>Hueco (m)</th>
+          <th>Alto corte</th>
+          <th class="key-cut-head">Corte por paño</th>
+          <th>Fruncido</th>
+          <th>Nº cortes</th>
+          <th>m/hoja</th>
+          <th>Total m</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${filteredRows.length?filteredRows.map(detailRow).join(''):`<tr><td colspan="8" class="empty">No hay habitaciones que coincidan con el filtro.</td></tr>`}
+        ${filteredRows.length?`<tr class="cut-total-row"><td colspan="7">TOTAL</td><td class="num"><b>${fmt(totalMeters)}</b></td></tr>`:''}
+      </tbody>
+    </table>`;
+    const groupedTable=`<table class="simple-table cut-grouped-table">
+      <thead>
+        <tr>
+          <th>Ref</th>
+          <th class="key-cut-head">Corte (m)</th>
+          <th>Habitaciones</th>
+          <th>Hojas total</th>
+          <th>Total m</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${groups.length?groups.map((g,i)=>`<tr><td><span class="cut-badge">C-${String(i+1).padStart(2,'0')}</span></td><td class="key-cut">${fmt(g.c.cutWidth)} × ${fmt(g.c.cutHeight)} m</td><td>${g.rooms.map(room=>`<span class="room-chip">${esc(room)}</span>`).join(' ')}</td><td class="num"><b>${g.cuts.length}</b></td><td class="num"><b>${fmt(g.cuts.reduce((a,c)=>a+c.meters,0))}</b></td></tr>`).join(''):`<tr><td colspan="5" class="empty">No hay medidas que coincidan con el filtro.</td></tr>`}
+        ${groups.length?`<tr class="cut-total-row"><td colspan="3">TOTAL</td><td class="num"><b>${totalSheets}</b></td><td class="num"><b>${fmt(totalMeters)}</b></td></tr>`:''}
+      </tbody>
+    </table>`;
+    const printDetailRows=filteredRows.length?filteredRows.map(detailRow).join(''):`<tr><td colspan="8" class="empty">No hay habitaciones que coincidan con el filtro.</td></tr>`;
+    const printTotal=filteredRows.length?`<tr class="cut-total-row"><td colspan="7">TOTAL</td><td class="num"><b>${fmt(totalMeters)}</b></td></tr>`:'';
+    q('#cutTable').innerHTML=`
+      <div class="cut-overview cut-screen">
+        <div class="cut-stat"><span>Habitaciones</span><strong>${filteredRows.length}</strong></div>
+        <div class="cut-stat accent"><span>Total de cortes</span><strong>${totalSheets}</strong></div>
+        <div class="cut-stat"><span>Medidas distintas</span><strong>${groups.length}</strong></div>
+        <div class="cut-stat"><span>Total metros</span><strong>${fmt(totalMeters)}</strong></div>
+      </div>
+      <div class="cut-screen" data-cut-active="${activeView}">
+        <div class="cut-tab-panel" id="cutPanelDetail" role="tabpanel" data-cut-panel="detail"${activeView!=='detail'?' hidden':''}>${detailTable}</div>
+        <div class="cut-tab-panel" id="cutPanelGrouped" role="tabpanel" data-cut-panel="grouped"${activeView!=='grouped'?' hidden':''}>${groupedTable}</div>
+      </div>
+      <div class="cut-print"><table class="simple-table print-only-table cut-detail-table"><thead><tr><th>${idHeader()}</th><th>Hueco (m)</th><th>Alto corte</th><th>Corte por paño</th><th>Fruncido</th><th>Nº cortes</th><th>m/hoja</th><th>Total m</th></tr></thead><tbody>${printDetailRows}</tbody>${printTotal}</table></div>
+    `;
+  }
+  function renderCutSummary(){
+    if(!readyRows().length){q('#cutSummary').innerHTML=emptyState({icon:'▥',title:'Todavía no hay cortes',text:'Cuando la relación tenga habitaciones con medidas válidas, aquí verá cada medida de corte agrupada con sus paños y habitaciones.',actions:[{label:'Ir a Datos y huecos',gotoView:'relacion',primary:true}]});return}
+    const groups=groupedCuts(),all=allGroupedCuts(),totalWindows=all.reduce((a,g)=>a+g.windows,0),totalCuts=all.reduce((a,g)=>a+g.cuts,0),t=totals(),totalMeters=t.meters,baseMeters=t.metersBase,closureMeters=totalMeters-baseMeters;
+    const palette=['#d97706','#2e90fa','#12b76a','#7f56d9','#f04438','#06aed4','#ee46bc','#667085'];
+    const colorFor=(key)=>{let h=0;for(let i=0;i<key.length;i++)h=(h*31+key.charCodeAt(i))>>>0;return palette[h%palette.length]};
+    const cards=groups.map((g,i)=>{
+      const max=96,min=56,ratio=g.height?g.width/g.height:1;let sw,sh;if(ratio>=1){sw=max;sh=Math.max(min,max/ratio)}else{sh=max;sw=Math.max(min,max*ratio)}
+      return `<article class="cut-card" style="--group-color:${colorFor(g.key)}"><div class="cut-card-head"><span>CORTE ${String(i+1).padStart(2,'0')}</span><strong>${g.cuts} PAÑO${g.cuts===1?'':'S'}</strong></div><div class="cut-card-body2"><div class="cut-card-top"><div class="cut-dim-block"><div class="cut-dimension">${fmt(g.width)}<span class="x">×</span>${fmt(g.height)}<span class="cut-unit">m</span></div><div class="cut-info-label">ancho × alto de corte</div></div><div class="cut-visual"><div class="cut-shape" style="width:${Math.round(sw)}px;height:${Math.round(sh)}px"></div><span class="cut-shape-caption">${fmt(g.width)} × ${fmt(g.height)} m</span></div></div><div class="cut-card-stats"><div><b>${g.cuts}</b><span>paño${g.cuts===1?'':'s'}</span></div><div><b>${g.windows}</b><span>hueco${g.windows===1?'':'s'}</span></div><div><b>${fmt(g.gather)}</b><span>fruncido</span></div><div><b>${fmt(g.meters)}</b><span>m de tela</span></div></div><div class="room-title">Habitaciones (${g.rooms.length})</div><div class="room-chips">${g.rooms.map(room=>`<span class="room-chip">${esc(room||'Sin identificar')}</span>`).join('')}</div></div></article>`;
+    }).join('');
+    const printRows=all.map((g,i)=>`<tr><td>${String(i+1).padStart(2,'0')}</td><td class="key-cut">${fmt(g.width)} m</td><td class="key-cut">${fmt(g.height)} m</td><td><b>${fmt(g.gather)}</b></td><td>${g.windows}</td><td><span class="cut-badge">${g.cuts}</span></td><td>${fmt(g.meters)} m</td><td class="room">${g.rooms.map(esc).join(', ')}</td></tr>`).join('');
+    q('#cutSummary').innerHTML=`<div class="cut-controls no-print"><input id="cutSearch" placeholder="Buscar habitación" value="${esc(q('#cutSearch')?.value||'')}"><select id="cutSort"><option value="height">Ordenar: alto</option><option value="width">Ordenar: ancho</option><option value="quantity">Ordenar: cantidad</option><option value="room">Ordenar: habitación</option></select></div><div class="paper preview landscape landscape-page">${paperHeader('TABLA DE CORTES')}<div class="paper-sub"><span><b>Tela:</b> ${esc(state.project.fabricName||'Sin nombre')}</span><span><b>Orden:</b> configurable por alto, ancho, cantidad o habitación</span></div><div class="cut-screen"><div class="cut-overview"><div class="cut-stat"><span>Medidas distintas</span><strong>${all.length}</strong></div><div class="cut-stat"><span>Huecos incluidos</span><strong>${totalWindows}</strong></div><div class="cut-stat accent"><span>Paños totales</span><strong>${totalCuts}</strong></div><div class="cut-stat"><span>Metros de tela</span><strong>${fmt(totalMeters)} m</strong><small>Base ${fmt(baseMeters)} m + Cierre ${fmt(closureMeters)} m</small></div></div>${groups.length?`<div class="cut-cards">${cards}</div>`:`<div class="empty">No hay cortes que coincidan con el filtro.</div>`}</div><div class="cut-print"><table class="simple-table print-only-table cut-detail-table"><thead><tr><th>Corte</th><th>Ancho</th><th>Alto</th><th>Fruncido</th><th>Huecos</th><th>Paños</th><th>Metros</th><th>${state.project.useBlockFloor?'Identificadores':'Habitaciones'}</th></tr></thead><tbody>${printRows||`<tr><td colspan="8" class="empty">No hay cortes para agrupar.</td></tr>`}</tbody><tfoot><tr><td colspan="4"><b>Total general</b></td><td><b>${totalWindows}</b></td><td><b>${totalCuts}</b></td><td><b>${fmt(totalMeters)} m</b></td><td></td></tr></tfoot></table></div></div>`;
+    if(q('#cutSort'))q('#cutSort').value=state.cutSort||'height';
+  }
+
+  function renderReview(){
+    const t=totals(),waste=t.meters*num(state.project.waste)/100,order=t.meters+waste,ordered=num(state.project.ordered),diff=ordered-t.meters,data=readyRows(),gathers=data.map(r=>num(r.gather)),validGather=!gathers.length||Math.min(...gathers)>=1&&Math.max(...gathers)<=2.5;
+    const validation=validateAll(),coherent=!validation.errors;
+    q('#orderTotal').textContent=fmt(order)+' m';q('#orderSub').textContent=`${fmt(t.meters)} m necesarios + ${fmt(waste)} m de merma.`;
+    q('#orderDetails').innerHTML=`<table class="simple-table"><tbody><tr><td>Metros necesarios</td><td class="num"><b>${fmt(t.meters)} m</b></td></tr><tr><td>Metros de merma (${fmt(state.project.waste,1)} %)</td><td class="num">${fmt(waste)} m</td></tr><tr><td><b>Metros a pedir</b></td><td class="num"><b>${fmt(order)} m</b></td></tr><tr><td>Diferencia pedidos ˆ’ necesarios</td><td class="num">${fmt(diff)} m</td></tr></tbody></table>`;
+    const statuses=[
+      {ok:ordered>=order,title:'Pedido y merma',good:`El pedido cubre la merma. Sobran ${fmt(ordered-order)} m.`,bad:`Faltan ${fmt(Math.max(0,order-ordered))} m para cubrir necesarios y merma.`},
+      {ok:validGather,title:'Fruncido',good:'Todos los factores están entre 1,00 y 2,50.',bad:'Hay al menos un fruncido fuera del rango 1,00–2,50.'},
+      {ok:coherent,title:'Validación de medidas',good:'No hay errores críticos en habitaciones o medidas.',bad:`Hay ${validation.errors} error${validation.errors===1?'':'es'} que conviene corregir.`}
+    ];
+    q('#reviewStatuses').innerHTML=statuses.map(s=>`<div class="status ${s.ok?'good':'bad'}"><strong>${s.ok?'✓':'!'} ${s.title}</strong>${s.ok?s.good:s.bad}</div>`).join('');
+    q('#fabricSummary').innerHTML=`<table class="simple-table"><thead><tr><th>Tela</th><th>Metros necesarios</th><th>Metros pedidos</th><th>Diferencia</th></tr></thead><tbody><tr><td>${esc(state.project.fabricName||'Sin nombre')}</td><td class="num">${fmt(t.meters)} m</td><td class="num">${fmt(ordered)} m</td><td class="num">${fmt(diff)} m</td></tr></tbody></table>`;
+  }
+  function railRows(){return readyRows().map(r=>{const width=num(r.width),final=width-num(state.project.railDeduction),supports=Math.max(0,Math.ceil(width/.5)),closure=(num(state.project.closureAdd)||FIXED_CLOSURE_ADD);return {r,width,final,supports,dark:final/2+closure}})}
+  function renderRails(){
+    if(!railRows().length){const empty=emptyState({icon:'═',title:'Sin rieles que calcular',text:'Los rieles se calculan a partir del ancho de cada hueco de la relación.',actions:[{label:'Ir a Datos y huecos',gotoView:'relacion',primary:true}]});q('#railTable').innerHTML=empty;q('#doubleRailTable').innerHTML=empty;return}
+    const base=(double)=>{const rows=railRows();const heads=double?`<th>${idHeader()}</th><th>Ancho hueco</th><th>Riel visillo</th><th>Ud.</th><th>Riel oscurante</th><th>Ud.</th><th>Soportes</th><th>Escuadras</th>`:`<th>${idHeader()}</th><th>Ancho hueco</th><th>Medida final</th><th>Tipo soporte (T/F)</th><th>Soportes</th><th>Escuadras</th>`;const body=rows.map(x=>double?`<tr><td>${esc(rowLabel(x.r))}</td><td class="num">${fmt(x.width)}</td><td class="num"><b>${fmt(x.final)}</b></td><td class="num">1</td><td class="num"><b>${fmt(x.dark)}</b></td><td class="num">2</td><td class="num">${x.supports}</td><td></td></tr>`:`<tr><td>${esc(rowLabel(x.r))}</td><td class="num">${fmt(x.width)}</td><td class="num"><b>${fmt(x.final)}</b></td><td></td><td class="num">${x.supports}</td><td></td></tr>`).join('');return `<div class="paper landscape landscape-page" style="box-shadow:none;width:100%;min-height:0;padding:0">${paperHeader(double?'RIELES DOBLES':'RIELES')}<div class="paper-sub"><span><b>Tela:</b> ${esc(state.project.fabricName)}</span><span><b>Descuento:</b> ${fmt(state.project.railDeduction)} m</span><span><b>Añadido cierre:</b> ${fmt(num(state.project.closureAdd)||FIXED_CLOSURE_ADD)} m</span></div><table class="simple-table print-only-table"><thead><tr>${heads}</tr></thead><tbody>${body||`<tr><td colspan="${double?8:6}" class="empty">No hay habitaciones cumplimentadas.</td></tr>`}</tbody></table></div>`};q('#railTable').innerHTML=base(false);q('#doubleRailTable').innerHTML=base(true)
+  }
+  const workflow=[['Crear una copia del trabajo','Guarde una versión o exporte antes de cambios importantes.'],['Rellenar los datos de la obra','Fecha, obra/hotel, tela, confección y número de hojas.'],['Importar o completar la relación','Pegue desde Excel, importe un XLSX o escriba las medidas.'],['Corregir incidencias','Revise duplicados, unidades y medidas incompletas.'],['Comprobar el cuadrante de corte','Verifique ancho y alto antes de cortar.'],['Gestionar producción','Marque habitaciones como cortadas, confeccionadas e instaladas.'],['Imprimir etiquetas','Identifique cada paño con habitación, corte y lado.'],['Exportar Excel o PDF','Genere el libro completo y las hojas de taller.']];
+  function renderChecklist(){q('#workflowChecks').innerHTML=workflow.map((x,i)=>`<label class="check"><input type="checkbox" data-check="flow-${i}" ${state.checks['flow-'+i]?'checked':''}><div><strong>${i+1}. ${x[0]}</strong><small>${x[1]}</small></div></label>`).join('');qa('[data-check="textiles"],[data-check="rails"],[data-check="bars"]').forEach(e=>e.checked=!!state.checks[e.dataset.check])}
+
+  function renderProduction(){
+    const rows=readyRows();
+    if(!rows.length){q('#productionKpis').innerHTML='';q('#productionOverall').innerHTML='';q('#productionTable').innerHTML=emptyState({icon:'◧',title:'Sin producción que seguir',text:'Cuando haya huecos con medidas válidas podrá marcar cada habitación como medida, cortada, confeccionada o instalada.',actions:[{label:'Ir a Datos y huecos',gotoView:'relacion',primary:true}]});return}
+    const counts=Object.fromEntries(Object.keys(STATUS).map(k=>[k,rows.filter(r=>r.status===k).length]));
+    const total=rows.length,done=counts.installed||0,pct=total?Math.round(done/total*100):0;
+    q('#productionKpis').innerHTML=Object.entries(STATUS).map(([k,v])=>`<div class="production-kpi"><span>${v.label}</span><strong>${counts[k]||0}</strong><div class="production-progress"><i style="width:${total?Math.round((counts[k]||0)/total*100):0}%"></i></div></div>`).join('');
+    q('#productionOverall').innerHTML=`<div class="order-summary"><span>Progreso total</span><strong>${pct} %</strong><small>${done} de ${total} habitaciones instaladas.</small></div>`;
+    const term=(q('#productionSearch')?.value||'').trim().toLowerCase(),filter=q('#productionStatusFilter')?.value||state.productionFilter||'all';state.productionFilter=filter;
+    const filtered=rows.filter(r=>(filter==='all'||(r.status||'')===filter)&&(!term||rowLabel(r).toLowerCase().includes(term)));
+    q('#productionTable').innerHTML=`<table class="simple-table production-table"><thead><tr><th>${idHeader()}</th><th>Hueco</th><th>Corte por hoja</th><th>Fruncido</th><th>Paños</th><th>Estado actual</th><th>Siguiente acción</th></tr></thead><tbody>${filtered.length?filtered.map(r=>{const c=calcRow(r),rank=STATUS[r.status]?.rank??-1,next=Object.keys(STATUS).find(k=>STATUS[k].rank===Math.min(3,rank+1))||r.status;return `<tr><td class="room"><b>${esc(rowLabel(r))}</b></td><td>${fmt(c.width)} × ${fmt(c.height)} m</td><td class="key-cut">${fmt(c.cutWidth)} × ${fmt(c.cutHeight)} m</td><td><b>${fmt(c.gather)}</b></td><td>${c.sheets}</td><td><select class="status-select" data-production-status="${r.id}">${STATUS_OPTIONS}</select></td><td>${rank<3?`<button class="btn small success" data-next-status="${r.id}" data-status="${next}">Marcar ${STATUS[next].label.toLowerCase()}</button>`:'<span class="status-pill installed">Finalizada</span>'}</td></tr>`}).join(''):`<tr><td colspan="7" class="empty">No hay habitaciones con este filtro.</td></tr>`}</tbody></table>`;
+    qa('[data-production-status]').forEach(s=>{const r=state.rows.find(x=>x.id===s.dataset.productionStatus);if(r)s.value=r.status});
+    if(q('#productionStatusFilter'))q('#productionStatusFilter').value=state.productionFilter||'all';
+  }
+
+  // Trazabilidad: código estable por trabajo + identificador (bloque/planta/habitación) + hoja.
+  const traceCode=(row,sheet)=>{
+    const job=(state.jobId||'').replace(/[^a-zA-Z0-9]/g,'').slice(0,6).toUpperCase()||'000000';
+    const parts=[String(row.block??'').trim(),String(row.floor??'').trim(),String(row.room??'').trim()].filter(Boolean).map(s=>String(s).toUpperCase().replace(/[^A-Z0-9]/g,'')).filter(Boolean);
+    const r=parts.join('-')||'XXX';
+    return `CC-${job}-${r}-H${sheet}`;
+  };
+  // Renderiza el patrón Code 128 como SVG en blanco y negro (barra = módulo impar).
+  const barcodeSvg=(pattern,height)=>{
+    const qz=10;let x=qz;let bars='';
+    for(let i=0;i<pattern.length;i++){
+      const w=Number(pattern[i]);
+      if(i%2===0)bars+=`<rect x="${x}" y="0" width="${w}" height="${height}"/>`;
+      x+=w;
+    }
+    const width=x+qz;
+    return `<svg class="label-barcode" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" preserveAspectRatio="none" role="img" aria-label="Código de barras de trazabilidad">${bars}</svg>`;
+  };
+
+  // Etiquetas actuales (con el filtro del toolbar): una por hoja (paño).
+  function currentLabels(){
+    const filter=q('#labelStatusFilter')?.value||state.labelFilter||'all';state.labelFilter=filter;
+    const search=(q('#labelSearch')?.value||'').trim().toLowerCase();
+    const rows=readyRows().filter(r=>(filter==='all'||(r.status||'')===filter)&&(!search||rowLabel(r).toLowerCase().includes(search)));
+    const allGroups=allGroupedCuts();
+    const items=[];
+    rows.forEach(r=>{
+      const c=calcRow(r),groupIndex=allGroups.findIndex(g=>g.key===cutKey(c))+1;
+      for(let i=0;i<c.sheets;i++){
+        const sheet=i+1;
+        const side=c.sheets===1?'ÚNICA':i===0?'IZQ':i===1?'DER':`HOJA ${sheet}`;
+        items.push({
+          hotel:state.project.hotel||'OBRA',
+          corte:`CORTE C-${String(groupIndex).padStart(2,'0')}`,
+          room:rowLabel(r),
+          size:`${fmt(c.cutWidth)} × ${fmt(c.cutHeight)} m`,
+          sheet:`HOJA ${sheet}/${c.sheets} · ${side}`,
+          meta1:`Hueco ${fmt(c.width)} × ${fmt(c.height)} m · Fruncido ${fmt(c.gather)}`,
+          meta2:`Tela ${state.project.fabricName||state.project.fabricType} · ${formatDate(state.project.date)}`,
+          code:traceCode(r,sheet),
+        });
+      }
+    });
+    return items;
+  }
+
+  function renderLabels(){
+    const labels=currentLabels().map(l=>{
+      const pattern=code128Pattern(l.code);
+      const barcode=pattern?barcodeSvg(pattern,28):'';
+      return `<article class="fabric-label"><div class="label-top"><span class="label-hotel">${esc(l.hotel)}</span><span class="label-code">${esc(l.corte)}</span></div><div class="label-room">${esc(l.room)}</div><div class="label-size">${esc(l.size)}</div><div class="label-sheet">${esc(l.sheet)}</div><div class="label-meta"><span><b>Hueco</b><br>${esc(l.meta1.replace(/ · Fruncido.*/,''))}</span><span><b>Fruncido</b><br>${esc(l.meta1.split(' · Fruncido ')[1]||'')}</span><span><b>Tela</b><br>${esc(l.meta2.split(' · ')[0])}</span><span><b>Fecha</b><br>${esc(l.meta2.split(' · ')[1]||'')}</span></div><div class="label-barcode-wrap">${barcode}<span class="label-trace">${esc(l.code)}</span></div></article>`;
+    });
+    q('#labelsGrid').innerHTML=labels.length?labels.join(''):emptyState({icon:'▣',title:'Sin etiquetas',text:readyRows().length?'Ninguna etiqueta coincide con el filtro actual.':'Las etiquetas se generan a partir de la relación de huecos: una por hoja (paño) con código de barras de trazabilidad para coser en el tejido.',actions:readyRows().length?[]:[{label:'Ir a Datos y huecos',gotoView:'relacion',primary:true}]});
+    q('#labelCount').textContent=`${labels.length} etiqueta${labels.length===1?'':'s'}`;
+    if(q('#labelStatusFilter'))q('#labelStatusFilter').value=state.labelFilter||'all';
+    if(q('#zebraLabelSize'))q('#zebraLabelSize').value=state.zebraLabelSize||'40x60';
+  }
+
+  // Código ZPL (formato nativo de impresora de etiquetas Zebra) de las etiquetas filtradas.
+  function buildZpl(){
+    const items=currentLabels();
+    const size=String(q('#zebraLabelSize')?.value||'40x60').split('x');
+    const w=parseInt(size[0],10)||40,h=parseInt(size[1],10)||60;
+    return {zpl:items.map(l=>zebraZpl(l,w,h)).join('\n\n'),count:items.length};
+  }
+  function showZpl(){
+    const {zpl}=buildZpl();
+    q('#zplOutput').value=zpl||'; Sin etiquetas para este filtro';
+    openModal('zplModal');
+  }
+  // Envío directo a la impresora: el agente local (scripts/zebra_agent.py) recibe
+  // el ZPL por HTTP en 127.0.0.1:8765 y lo reenvía a la Zebra por el puerto 9100.
+  async function sendToZebra(){
+    const {zpl,count}=buildZpl();
+    if(!count){toast('No hay etiquetas para este filtro');return}
+    try{
+      const res=await fetch('http://127.0.0.1:8765/',{method:'POST',headers:{'Content-Type':'text/plain'},body:zpl});
+      if(!res.ok)throw new Error('HTTP '+res.status);
+      toast(`Enviado a la Zebra: ${count} etiqueta${count===1?'':'s'}`);
+    }catch{
+      toast('No se pudo enviar a la Zebra: arranca scripts/zebra_agent.py <IP> en el PC del taller y comprueba la IP de la impresora (o usa ZPL Zebra → Descargar .prn)');
+    }
+  }
+
+  function renderJobs(){
+    const list=q('#jobsList');if(!list)return;
+    const others=jobScope==='others';
+    const filter=state.jobFilter||'active';
+    state.jobFilter=filter;
+    let jobs=(others?(jobsData.others||[]):jobsData.jobs).slice().sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt));
+    if(filter==='active')jobs=jobs.filter(j=>!j.closed);
+    else if(filter==='closed')jobs=jobs.filter(j=>!!j.closed);
+    if(q('#newJobBtn'))q('#newJobBtn').hidden=others;
+    list.innerHTML=jobs.length?jobs.map(job=>{
+      const s=normalizeState(job.state),rows=s.rows.filter(r=>rowLabel(r)&&num(r.width)>0&&num(r.height)>0).length;
+      const closed=!!job.closed;
+      const isCurrent=job.id===state.jobId;
+      const cls=`job-card ${isCurrent?'current':''} ${closed?'closed':''} ${others?'readonly':''}`.trim();
+      const closedBadge=closed?'<span class="job-badge-closed">Cerrado</span>':'';
+      const ownerBadge=others?`<span class="job-owner">${esc(job.owner||'Sin asignar')}</span>`:'';
+      const updated=new Date(job.updatedAt).toLocaleString('es-ES',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+      const meta=`<span>${rows} habitacion${rows===1?'':'es'}</span><span class="dot">·</span><span>${closed?'cerrado':'actualizado'} ${updated}</span>`;
+      const duplicateBtn=`<button class="btn duplicate" data-job-duplicate="${job.id}" title="Crear un trabajo nuevo basado en este">Duplicar</button>`;
+      let actions;
+      if(others){
+        // Trabajos de compañeros: solo ver (solo lectura) y duplicar como trabajo propio.
+        actions=`<button class="btn primary" data-job-open="${job.id}">Ver</button>${duplicateBtn}`;
+      }else{
+        const primaryBtn=isCurrent
+          ? '<span class="status-text">Trabajo actual</span>'
+          : `<button class="btn primary" data-job-open="${job.id}">Abrir</button>`;
+        const reopenBtn=`<button class="btn" data-job-reopen="${job.id}">Reabrir</button>`;
+        const closeBtn=`<button class="btn" data-job-close="${job.id}">Cerrar</button>`;
+        const deleteBtn=jobsData.jobs.length>1
+          ? `<button class="btn icon-only" data-job-delete="${job.id}" title="Eliminar trabajo" aria-label="Eliminar">×</button>`
+          : '';
+        actions=`${primaryBtn}${closed?reopenBtn:duplicateBtn}${closed?duplicateBtn:closeBtn}${deleteBtn}`;
+      }
+      return `<article class="${cls}" data-job-card="${job.id}"><div><h4>${esc(job.name||'Trabajo sin nombre')} ${ownerBadge} ${closedBadge}</h4><div class="job-meta-row">${meta}</div></div><div class="job-actions">${actions}</div></article>`;
+    }).join(''):emptyState({icon:'🗂',title:others?'Sin trabajos de compañeros':`No hay trabajos ${filter==='closed'?'cerrados':filter==='active'?'activos':''}`,text:others?'Los trabajos de tus compañeros aparecerán aquí con el nombre de su autor. Puedes verlos y duplicarlos, pero no editarlos.':(filter==='all'?'Cree un trabajo nuevo para empezar.':'Cree un trabajo nuevo o cambie el filtro para ver otros.')});
+    qa('.job-filter-tabs button').forEach(b=>b.classList.toggle('active',b.dataset.jobFilter===filter));
+    qa('.job-scope-tabs button').forEach(b=>b.classList.toggle('active',b.dataset.jobScope===jobScope));
+  }
+  async function closeJob(id){
+    const job=jobsData.jobs.find(j=>j.id===id);if(!job)return;
+    if(job.closed)return;
+    const ok=await askConfirm({title:'Cerrar trabajo',message:`¿Cerrar «${job.name||'sin nombre'}»? Los datos se conservan pero el trabajo deja de contar como activo. Podrás reabrirlo desde esta misma lista.`,confirmLabel:'Cerrar trabajo'});
+    if(!ok)return;
+    job.closed=true;
+    job.closedAt=new Date().toISOString();
+    checkpoint(`Cerrar trabajo ${job.name||id}`);
+    save();renderJobs();toast('Trabajo cerrado');
+  }
+  function reopenJobFn(id){
+    const job=jobsData.jobs.find(j=>j.id===id);if(!job)return;
+    if(!job.closed)return;
+    job.closed=false;delete job.closedAt;
+    checkpoint(`Reabrir trabajo ${job.name||id}`);
+    save();renderJobs();toast('Trabajo reabierto');
+  }
+  let newJobSource='blank';
+  let newJobDuplicateId=null;
+  let newJobTemplateId=null;
+  function _refreshNewJobPickers(){
+    const dupPicker=q('#newJobDuplicatePicker');
+    const tplPicker=q('#newJobTemplatePicker');
+    if(dupPicker)dupPicker.hidden=newJobSource!=='duplicate';
+    if(tplPicker)tplPicker.hidden=newJobSource!=='template';
+  }
+  function openNewJobModal(){
+    newJobSource='blank';
+    newJobDuplicateId=null;
+    newJobTemplateId=null;
+    // Nombre por defecto: si hay un trabajo activo, sugiere una variante
+    const nameInput=q('#newJobName');
+    if(nameInput){
+      nameInput.value='';
+      nameInput.placeholder=`Ej: ${state.project?.hotel||'Hotel '}+${Math.floor(Math.random()*99)+10}`;
+    }
+    // Actualiza el meta del botón "duplicar"
+    const metaEl=q('#newJobDuplicateMeta');
+    const active=(jobsData.jobs||[]).filter(j=>!j.closed);
+    const dupBtn=q('#newJobDuplicateOption');
+    if(active.length>0){
+      const last=active[0];
+      const s=normalizeState(last.state);
+      const rooms=s.rows.filter(r=>rowLabel(r)&&num(r.width)>0&&num(r.height)>0).length;
+      if(metaEl)metaEl.textContent=`Copia "${last.name||'sin nombre'}" con ${rooms} habitaciones. Tendrás que cambiar el nombre.`;
+      if(dupBtn)dupBtn.style.display='';
+    }else{
+      if(metaEl)metaEl.textContent='No hay trabajos activos para duplicar.';
+      if(dupBtn)dupBtn.style.display='none';
+    }
+    // Poblar el selector de duplicar con los trabajos activos
+    const dupSelect=q('#newJobDuplicateSelect');
+    if(dupSelect){
+      const opts=active.map(j=>`<option value="${esc(j.id)}">${esc(j.name||'Sin nombre')}</option>`).join('');
+      dupSelect.innerHTML=opts||'<option value="" disabled>No hay trabajos activos</option>';
+      if(active[0]){dupSelect.value=active[0].id;newJobDuplicateId=active[0].id;}
+    }
+    // Poblar el selector de plantillas (built-in + custom)
+    const tplSelect=q('#newJobTemplateSelect');
+    if(tplSelect){
+      const custom=customTemplates();
+      const built=BUILTIN_TEMPLATES.map(t=>`<option value="${esc(t.id)}" data-builtin="1">˜… ${esc(t.name)}</option>`).join('');
+      const customOpts=custom.map(t=>`<option value="${esc(t.id)}">⭐ ${esc(t.name)} (mi plantilla)</option>`).join('');
+      tplSelect.innerHTML=built+(customOpts?`<optgroup label="Mis plantillas">${customOpts}</optgroup>`:'');
+      if(BUILTIN_TEMPLATES[0]){tplSelect.value=BUILTIN_TEMPLATES[0].id;newJobTemplateId=BUILTIN_TEMPLATES[0].id;}
+    }
+    // Marcar la opción por defecto y refrescar visibilidad de pickers
+    qa('.new-job-option').forEach(b=>b.classList.toggle('selected',b.dataset.newjobSource===newJobSource));
+    _refreshNewJobPickers();
+    openModal('newJobModal');
+    setTimeout(()=>q('#newJobName')?.focus(),80);
+  }
+  function createNewJobFromModal(){
+    const nameInput=q('#newJobName');
+    const rawName=(nameInput?.value||'').trim();
+    persistNow();
+    let s;
+    if(newJobSource==='duplicate'){
+      // Usa el id del selector, no siempre el primero.
+      const id=q('#newJobDuplicateSelect')?.value||newJobDuplicateId;
+      const src=(jobsData.jobs||[]).find(j=>j.id===id&&!j.closed);
+      if(!src)return toast('No hay un trabajo activo para duplicar.',true);
+      newJobDuplicateId=src.id;
+      s=normalizeState(deepClone(src.state));
+      // Limpia las habitaciones: el duplicado empieza sin huecos.
+      // Mantiene la configuración del proyecto (hotel, tela, confección) que el usuario
+      // puede sobrescribir antes de empezar.
+      s.rows=[];
+    }else if(newJobSource==='template'){
+      // Resuelve la plantilla (built-in o custom) por id.
+      const tplId=q('#newJobTemplateSelect')?.value||newJobTemplateId;
+      const custom=customTemplates().find(t=>t.id===tplId);
+      const tpl=custom||BUILTIN_TEMPLATES.find(t=>t.id===tplId);
+      if(!tpl)return toast('Plantilla no encontrada.',true);
+      newJobTemplateId=tpl.id;
+      s=normalizeState(defaultState());
+      // Aplica los values de la plantilla al proyecto.
+      Object.assign(s.project,tpl.values||{});
+    }else{
+      s=normalizeState(defaultState());
+    }
+    s.jobId=uid();
+    s.project.hotel=rawName||s.project.hotel||'Trabajo sin nombre';
+    const jobName=rawName||s.project.hotel||'Trabajo sin nombre';
+    const job={id:s.jobId,name:jobName,updatedAt:new Date().toISOString(),state:deepClone(s),versions:[]};
+    jobsData.jobs.unshift(job);
+    jobsData.currentId=job.id;
+    state=s;
+    selectedIds.clear();
+    undoStack=[];redoStack=[];
+    viewOnlyJobId=null;jobScope='mine';
+    persistNow();
+    renderAll();
+    renderJobs();
+    closeModal('newJobModal');
+    const toastMsg=newJobSource==='duplicate'?`Duplicado de "${job.name}" — recuerda cambiar el nombre y los huecos`:
+      newJobSource==='template'?`Nuevo trabajo con plantilla aplicada: ${job.name}`:
+      `Nuevo trabajo creado: ${job.name}`;
+    toast(toastMsg);
+    // Foco inmediato en el input del hotel para que pueda renombrar al instante
+    setTimeout(()=>{
+      const hotelInput=q('#p-hotel');
+      if(hotelInput){hotelInput.focus();hotelInput.select();}
+    },120);
+  }
+  async function newJob(){
+    // Si el trabajo actual tiene datos sin cerrar, avisa antes de reemplazarlo
+    const currentJob=jobsData.jobs.find(j=>j.id===state.jobId);
+    const hasData=state.rows?.some(r=>rowLabel(r)&&num(r.width)>0&&num(r.height)>0);
+    if(currentJob&&!currentJob.closed&&hasData){
+      const ok=await askConfirm({title:'Crear trabajo nuevo',message:`Tienes datos sin cerrar en «${currentJob.name||'este trabajo'}». ¿Crear un trabajo nuevo igualmente? El actual se queda guardado en Trabajos guardados.`,confirmLabel:'Crear nuevo'});
+      if(!ok)return;
+    }
+    openNewJobModal();
+  }
+  function openJob(id){
+    if(id===state.jobId){closeModal('jobsModal');return}
+    persistNow();
+    const fromOthers=(jobsData.others||[]).find(j=>j.id===id);
+    const job=jobsData.jobs.find(j=>j.id===id)||fromOthers;if(!job)return;
+    viewOnlyJobId=fromOthers?id:null;
+    state=normalizeState(deepClone(job.state));state.jobId=id;jobsData.currentId=id;selectedIds.clear();undoStack=[];redoStack=[];persistNow();renderAll();closeModal('jobsModal');
+    window.dispatchEvent(new CustomEvent('egea:job-opened',{detail:{id,readonly:!!fromOthers}}));
+    toast(fromOthers?`Viendo «${job.name}» de ${job.owner||'un compañero'} (solo lectura) — duplícalo para editarlo`:`Trabajo abierto: ${job.name}`);
+  }
+  function duplicateJob(id){
+    const source=jobsData.jobs.find(j=>j.id===id)||(jobsData.others||[]).find(j=>j.id===id);if(!source)return;
+    const s=normalizeState(deepClone(source.state));s.jobId=uid();s.project.hotel=(s.project.hotel||source.name||'Trabajo')+' · copia';
+    const job={id:s.jobId,name:s.project.hotel,updatedAt:new Date().toISOString(),state:s,versions:[]};jobsData.jobs.unshift(job);viewOnlyJobId=null;jobScope='mine';
+    window.dispatchEvent(new CustomEvent('egea:job-create',{detail:{job:deepClone(job)}}));renderJobs();toast('Trabajo duplicado como propio');
+  }
+  async function deleteJob(id){
+    if(jobsData.jobs.length<=1)return;
+    const job=jobsData.jobs.find(j=>j.id===id);if(!job)return;
+    const ok=await askConfirm({title:'Eliminar trabajo',message:`¿Eliminar «${job.name}»? Esta acción no se puede deshacer.`,confirmLabel:'Eliminar',danger:true});
+    if(!ok)return;
+    window.dispatchEvent(new CustomEvent('egea:job-delete',{detail:{id}}));
+    jobsData.jobs=jobsData.jobs.filter(j=>j.id!==id);
+    if(state.jobId===id){const next=jobsData.jobs[0];state=normalizeState(deepClone(next.state));state.jobId=next.id;jobsData.currentId=next.id;renderAll()}
+    persistNow();renderJobs();toast('Trabajo eliminado');
+  }
+  // Cierra automáticamente un trabajo si todas las habitaciones están instaladas
+  // desde hace más de AUTO_CLOSE_DAYS días. No avisa al usuario (es housekeeping silencioso).
+  const AUTO_CLOSE_DAYS=30;
+  function autoCloseFinishedJobs(){
+    const now=Date.now();
+    let changed=false;
+    for(const job of jobsData.jobs){
+      if(job.closed)continue;
+      const s=normalizeState(job.state);
+      const dataRows=s.rows.filter(r=>rowLabel(r)&&num(r.width)>0&&num(r.height)>0);
+      if(!dataRows.length)continue;
+      const allInstalled=dataRows.every(r=>r.status==='installed');
+      if(!allInstalled)continue;
+      const lastUpdate=new Date(job.updatedAt||0).getTime();
+      const ageDays=(now-lastUpdate)/(1000*60*60*24);
+      if(ageDays>=AUTO_CLOSE_DAYS){
+        job.closed=true;job.closedAt=new Date().toISOString();changed=true;
+      }
+    }
+    return changed;
+  }
+
+  function customTemplates(){try{return JSON.parse(localStorage.getItem(CUSTOM_TEMPLATES_KEY)||'[]')}catch{return[]}}
+  function renderTemplates(){
+    const built=BUILTIN_TEMPLATES.map(t=>templateCard(t,false)).join(''),custom=customTemplates().map(t=>templateCard(t,true)).join('');
+    q('#templatesList').innerHTML=built+(custom||'<div class="empty">No hay plantillas personalizadas.</div>');
+  }
+  function templateCard(t,isCustom){
+    const v=t.values||{};return `<article class="template-card"><h4>${esc(t.name)}</h4><p>${esc(t.description||'Configuración guardada')}</p><div class="template-values"><span>${v.mode||2} hoja${Number(v.mode||2)===1?'':'s'}</span><span>Fruncido ${fmt(v.gather??2)}</span><span>Bajo ${fmt(v.hem??.25)} m</span><span>${esc(v.fabricType||'Tela')}</span></div><button class="btn small primary" data-template-apply="${esc(t.id)}" data-template-custom="${isCustom?'1':'0'}">Aplicar</button>${isCustom?` <button class="btn small danger" data-template-delete="${esc(t.id)}">Eliminar</button>`:''}</article>`;
+  }
+  async function applyTemplate(id,isCustom=false){
+    const t=isCustom?customTemplates().find(x=>x.id===id):BUILTIN_TEMPLATES.find(x=>x.id===id);if(!t)return;
+    checkpoint(`Aplicar plantilla ${t.name}`);
+    Object.assign(state.project,t.values||{});
+    const alsoRows=await askConfirm({title:'Aplicar a las filas',message:`Plantilla «${t.name}» aplicada a la configuración. ¿Aplicar también fruncido, bajo y número de hojas a las filas existentes?`,confirmLabel:'Sí, a todas las filas',cancelLabel:'Solo configuración'});
+    if(alsoRows)state.rows.forEach(r=>{r.gather=state.project.gather;r.hem=state.project.hem;r.sheets=state.project.mode});
+    save();renderAll();closeModal('templatesModal');toast(`Plantilla aplicada: ${t.name}`);
+  }
+  async function saveCustomTemplate(){
+    const name=await askText({title:'Nueva plantilla',message:'Guarda la configuración actual (tela, confección, fruncido…) como plantilla reutilizable.',input:{label:'Nombre de la plantilla',placeholder:'Ej. Oscurante fruncido 2,2'},confirmLabel:'Guardar plantilla',required:true});
+    if(!name||!String(name).trim())return;
+    const list=customTemplates();list.unshift({id:uid(),name:String(name).trim(),description:'Plantilla creada desde el trabajo actual',values:{mode:state.project.mode,gather:state.project.gather,hem:state.project.hem,closureAdd:state.project.closureAdd,fabricType:state.project.fabricType,confectionType:state.project.confectionType,heightDiscount:state.project.heightDiscount}});
+    localStorage.setItem(CUSTOM_TEMPLATES_KEY,JSON.stringify(list.slice(0,30)));renderTemplates();toast('Plantilla guardada');
+  }
+  function deleteCustomTemplate(id){const list=customTemplates().filter(x=>x.id!==id);localStorage.setItem(CUSTOM_TEMPLATES_KEY,JSON.stringify(list));renderTemplates()}
+
+  function renderTrash(){
+    const el=q('#trashList');if(!el)return;
+    el.innerHTML=state.trash.length?state.trash.map(item=>`<article class="trash-row"><div><b>Habitación ${esc(rowLabel(item.row)||'sin identificar')}</b><p>${fmt(item.row.width)} × ${fmt(item.row.height)} m · eliminada ${new Date(item.deletedAt).toLocaleString('es-ES')}</p></div><div class="history-actions"><button class="btn small primary" data-trash-restore="${item.id}">Restaurar</button><button class="btn small danger" data-trash-remove="${item.id}">Borrar</button></div></article>`).join(''):emptyState({icon:'🝑',title:'La papelera está vacía',text:'Cuando elimine filas de la relación aparecerán aquí y podrá restaurarlas.'});
+  }
+  function trashRows(ids){
+    const rows=state.rows.filter(r=>ids.includes(r.id)&&hasData(r));if(!rows.length)return;
+    checkpoint(rows.length===1?'Eliminar fila':'Eliminar filas');
+    rows.forEach(r=>state.trash.unshift({id:uid(),row:deepClone(r),deletedAt:new Date().toISOString()}));
+    state.trash=state.trash.slice(0,100);state.rows=state.rows.filter(r=>!ids.includes(r.id));while(state.rows.length<12)state.rows.push(blankRow(state.project));ids.forEach(id=>selectedIds.delete(id));save();renderAll();toast(`${rows.length} fila${rows.length===1?'':'s'} enviada${rows.length===1?'':'s'} a la papelera`);
+  }
+  function restoreTrash(id){const item=state.trash.find(x=>x.id===id);if(!item)return;checkpoint('Restaurar fila');state.rows=state.rows.filter(hasData);state.rows.push({...item.row,id:uid()});state.trash=state.trash.filter(x=>x.id!==id);while(state.rows.length<12)state.rows.push(blankRow(state.project));save();renderAll();renderTrash();toast('Fila restaurada')}
+  function removeTrash(id){state.trash=state.trash.filter(x=>x.id!==id);save();renderTrash()}
+  function renderHistory(){
+    const job=currentJob(),versions=job?.versions||[],el=q('#historyList');if(!el)return;
+    const activity=state.activity.slice(0,20).map(a=>`<article class="history-row"><div><b>${esc(a.label)}</b><p>${new Date(a.time).toLocaleString('es-ES')}</p></div><span class="status-pill">Actividad</span></article>`).join('');
+    const saved=versions.map(v=>`<article class="history-row"><div><b>${esc(v.label)}</b><p>${new Date(v.time).toLocaleString('es-ES')}</p></div><button class="btn small primary" data-version-restore="${v.id}" data-job-id="${job.id}">Restaurar</button></article>`).join('');
+    el.innerHTML=(saved||'<div class="empty">Todavía no hay versiones guardadas.</div>')+(activity?`<h4 style="margin:14px 0 4px">Actividad reciente</h4>${activity}`:'');
+  }
+
+  // normalizeHeader, detectExcelColumns, splitExcelText y statusFromValue
+  // viven en /static/logic.js (globales), compartidos con la suite de tests.
+  function rowsFromMatrix(matrix,headerIndex,map){
+    const header=matrix[headerIndex]||[],data=matrix.slice(headerIndex+1),rows=[];
+    for(const cells of data){
+      const get=k=>map[k]>=0?(cells[map[k]]??''):'';
+      const bf=!!state.project.useBlockFloor;
+      const block=bf?String(get('block')).trim():'',floor=bf?String(get('floor')).trim():'',room=String(get('room')).trim(),w=parseDimension(get('width'),header[map.width]),h=parseDimension(get('height'),header[map.height]),hem=parseDimension(get('hem'),header[map.hem]);
+      const gatherRaw=String(get('gather')).trim(),sheetsRaw=String(get('sheets')).trim(),notes=String(get('notes')).trim();
+      if(!block&&!floor&&!room&&w.value===''&&h.value===''&&!notes)continue;
+      const r=blankRow(state.project);Object.assign(r,{block,floor,room,width:w.value,height:h.value,gather:gatherRaw===''?state.project.gather:num(gatherRaw),hem:hem.value===''?state.project.hem:hem.value,sheets:sheetsRaw===''?state.project.mode:Math.max(1,Math.round(num(sheetsRaw))),notes,status:map.status>=0?statusFromValue(get('status')):''});
+      if(w.converted)r.converted.width=w.source;if(h.converted)r.converted.height=h.source;if(hem.converted)r.converted.hem=hem.source;
+      rows.push(r);
+    }
+    return rows;
+  }
+  function validateImportBatch(rows,mode='append'){
+    const existing=new Set(mode==='replace'?[]:state.rows.filter(hasData).map(r=>normalizeText(rowLabel(r))).filter(Boolean));
+    const seen=new Set(existing);
+    return rows.map((row,index)=>{
+      const errors=[],id=normalizeText(rowLabel(row));
+      if(!id)errors.push('Falta el identificador (habitación, bloque o planta)');
+      if(num(row.width)<=0)errors.push('Falta o no es válido el ancho');
+      if(num(row.height)<=0)errors.push('Falta o no es válida la altura');
+      if(id&&seen.has(id))errors.push('Identificador duplicado');
+      if(id)seen.add(id);
+      return {row,index,errors,valid:errors.length===0};
+    });
+  }
+  function analyzeExcelPaste(raw,headerMode='auto'){
+    const matrix=splitExcelText(raw).filter(row=>row.some(v=>String(v).trim()!==''));if(!matrix.length)throw new Error('No hay datos para analizar');
+    const detected=detectExcelColumns(matrix[0]),hasHeader=headerMode==='yes'||(headerMode==='auto'&&detected.matches>=2),headerIndex=hasHeader?0:-1;
+    const map=hasHeader?detected.map:{room:0,width:1,height:2,gather:3,hem:4,sheets:5,notes:6,status:-1};
+    if(hasHeader){if(map.room<0)map.room=0;if(map.width<0)map.width=1;if(map.height<0)map.height=2}
+    const rows=hasHeader?rowsFromMatrix(matrix,0,map):matrix.map(cells=>{
+      const r=blankRow(state.project),w=parseDimension(cells[1]),h=parseDimension(cells[2]),hem=parseDimension(cells[4]);Object.assign(r,{room:String(cells[0]??'').trim(),width:w.value,height:h.value,gather:String(cells[3]??'').trim()===''?state.project.gather:num(cells[3]),hem:hem.value===''?state.project.hem:hem.value,sheets:String(cells[5]??'').trim()===''?state.project.mode:Math.max(1,Math.round(num(cells[5]))),notes:String(cells[6]??'').trim()});if(w.converted)r.converted.width=w.source;if(h.converted)r.converted.height=h.source;if(hem.converted)r.converted.hem=hem.source;return r
+    }).filter(hasData);
+    if(!rows.length)throw new Error('No se detectaron habitaciones o medidas');
+    const validation=validateImportBatch(rows,q('#excelImportMode')?.value||'append'),invalid=validation.filter(item=>!item.valid).length,converted=rows.filter(r=>Object.keys(r.converted).length).length;
+    return {rows,validation,hasHeader,invalid,converted,sourceRows:matrix.length-(hasHeader?1:0)};
+  }
+  function renderExcelPreview(result){
+    excelPasteResult=result;const info=q('#excelPreviewInfo'),body=q('#excelPreviewBody'),apply=q('#excelApplyBtn');
+    info.className='excel-preview-info '+(result.invalid?'warn':'good');
+    info.innerHTML=`<b>${result.rows.length} fila${result.rows.length===1?'':'s'} detectada${result.rows.length===1?'':'s'}.</b> ${result.hasHeader?'Encabezados reconocidos.':'Orden estándar aplicado.'}${result.converted?` <b>${result.converted} fila${result.converted===1?' convertida':'s convertidas'} automáticamente de cm/mm.</b>`:''}${result.invalid?` <b>${result.invalid} fila${result.invalid===1?' necesita':'s necesitan'} revisión.</b>`:''}`;
+    body.innerHTML=result.validation.slice(0,15).map(({row:r,index:i,errors})=>`<tr class="${errors.length?'bad':Object.keys(r.converted).length?'converted':''}"><td>${i+1}</td><td>${esc(rowLabel(r))}</td><td>${r.width===''?'—':fmt(r.width)}</td><td>${r.height===''?'—':fmt(r.height)}</td><td>${fmt(r.gather)}</td><td>${fmt(r.hem)}</td><td>${r.sheets}</td><td style="text-align:left">${esc(r.notes)}${errors.length?`<br><b style="color:#b42318">${esc(errors.join(' · '))}</b>`:''}</td></tr>`).join('')+(result.rows.length>15?`<tr><td colspan="8">… y ${result.rows.length-15} filas más</td></tr>`:'');
+    apply.disabled=!result.validation.some(item=>item.valid);
+  }
+  function openImportTab(tab='paste'){
+    qa('[data-import-tab]').forEach(b=>{const active=b.dataset.importTab===tab;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active))});
+    qa('[data-import-panel]').forEach(p=>p.hidden=p.dataset.importPanel!==tab);
+    openModal('importModal');
+    if(tab==='paste')setTimeout(()=>q('#excelPasteText').focus(),80);
+    if(tab==='xlsx')setTimeout(()=>q('#xlsxFileInput').focus(),80);
+    if(tab==='backup')setTimeout(()=>q('#importBackupChoice').focus(),80);
+  }
+  function openExcelPaste(){excelPasteResult=null;q('#excelPasteText').value='';q('#excelPreviewInfo').className='excel-preview-info';q('#excelPreviewInfo').textContent='Pegue datos y pulse «Analizar y previsualizar».';q('#excelPreviewBody').innerHTML='<tr><td colspan="8" style="padding:28px;color:var(--muted)">Sin datos analizados</td></tr>';q('#excelApplyBtn').disabled=true;openImportTab('paste')}
+  function importExcelPaste(){if(!excelPasteResult?.rows?.length)return;const mode=q('#excelImportMode').value,validation=validateImportBatch(excelPasteResult.rows,mode),valid=validation.filter(item=>item.valid).map(item=>item.row),failed=validation.length-valid.length;if(!valid.length)return toast('No hay filas válidas para importar.',true);checkpoint('Importar filas pegadas desde Excel');if(mode==='replace')state.rows=[];else state.rows=state.rows.filter(hasData);state.rows.push(...valid.map(r=>({...r,id:uid()})));while(state.rows.length<12)state.rows.push(blankRow(state.project));save(true,'clipboard');closeModal('importModal');renderAll();setWorkflowActive(2);toast(`${valid.length} filas importadas${failed?`; ${failed} omitidas por errores`:''}`)}
+
+  function parseCSV(text){
+    const matrix=splitExcelText(String(text).replace(/^\uFEFF/,''));if(matrix.length<2)throw new Error('El CSV no contiene filas');const detected=detectExcelColumns(matrix[0]),map=detected.map;if(map.room<0)map.room=0;if(map.width<0)map.width=1;if(map.height<0)map.height=2;const rows=rowsFromMatrix(matrix,0,map);if(!rows.length)throw new Error('No se detectaron datos');state.rows=rows;while(state.rows.length<12)state.rows.push(blankRow(state.project));
+  }
+
+  function xlsxAvailable(){return typeof window.XLSX!=='undefined'}
+  function openXlsxImport(){
+    if(!xlsxAvailable()){toast('No se ha podido cargar el motor de Excel. Compruebe la conexión a internet.',true);return}
+    xlsxWorkbook=null;xlsxMatrix=[];q('#xlsxFileInput').value='';q('#xlsxSheetSelect').innerHTML='';q('#xlsxPreviewBody').innerHTML='<tr><td colspan="8" style="padding:28px">Seleccione un archivo Excel.</td></tr>';q('#xlsxInfo').className='xlsx-info';q('#xlsxInfo').textContent='Admite .xlsx y .xls. Después podrá elegir hoja y asignar columnas.';q('#xlsxApplyBtn').disabled=true;openImportTab('xlsx');
+  }
+  function loadXlsxFile(file){
+    if(!xlsxAvailable())return toast('Motor Excel no disponible',true);
+    if(file.size>5*1024*1024)return toast('El archivo supera el límite de 5 MB.',true);
+    const reader=new FileReader();reader.onload=()=>{try{xlsxWorkbook=XLSX.read(reader.result,{type:'array',cellDates:true});xlsxFileName=file.name;q('#xlsxSheetSelect').innerHTML=xlsxWorkbook.SheetNames.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');prepareXlsxSheet(xlsxWorkbook.SheetNames[0]);toast('Excel leído correctamente')}catch(e){toast('No se pudo leer el Excel: '+(e.message||e),true)}};reader.readAsArrayBuffer(file);
+  }
+  function bestHeaderRow(matrix){let best=0,score=-1;for(let i=0;i<Math.min(12,matrix.length);i++){const d=detectExcelColumns(matrix[i]||[]);if(d.matches>score){score=d.matches;best=i}}return best}
+  function prepareXlsxSheet(name){
+    if(!xlsxWorkbook)return;const ws=xlsxWorkbook.Sheets[name];xlsxMatrix=XLSX.utils.sheet_to_json(ws,{header:1,raw:false,defval:'',blankrows:false});
+    for(const merge of ws['!merges']||[]){const value=xlsxMatrix[merge.s.r]?.[merge.s.c]??'';for(let row=merge.s.r;row<=merge.e.r;row++){xlsxMatrix[row]=xlsxMatrix[row]||[];for(let col=merge.s.c;col<=merge.e.c;col++)if(String(xlsxMatrix[row][col]??'').trim()==='')xlsxMatrix[row][col]=value}}
+    const headerIndex=bestHeaderRow(xlsxMatrix);q('#xlsxHeaderRow').value=headerIndex+1;populateMapping(headerIndex);renderXlsxPreview();
+  }
+  function mappingSelectOptions(header,selected){return '<option value="-1">— No importar —</option>'+header.map((v,i)=>`<option value="${i}" ${i===selected?'selected':''}>${String.fromCharCode(65+(i%26))}${i>=26?Math.floor(i/26):''} · ${esc(v||`Columna ${i+1}`)}</option>`).join('')}
+  function populateMapping(headerIndex){
+    const header=xlsxMatrix[headerIndex]||[],det=detectExcelColumns(header),fallback={block:-1,floor:-1,room:0,width:1,height:2,gather:3,hem:4,sheets:5,notes:6,status:-1};
+    for(const key of Object.keys(fallback)){const el=q(`#map-${key}`);if(el)el.innerHTML=mappingSelectOptions(header,det.map[key]>=0?det.map[key]:fallback[key])}
+  }
+  function currentXlsxMap(){const map={};for(const key of ['block','floor','room','width','height','gather','hem','sheets','notes','status'])map[key]=Number(q(`#map-${key}`)?.value??-1);return map}
+  function renderXlsxPreview(){
+    if(!xlsxMatrix.length)return;const headerIndex=Math.max(0,Number(q('#xlsxHeaderRow').value||1)-1),map=currentXlsxMap(),rows=rowsFromMatrix(xlsxMatrix,headerIndex,map),validation=validateImportBatch(rows,q('#xlsxImportMode')?.value||'append'),invalid=validation.filter(item=>!item.valid).length,converted=rows.filter(r=>Object.keys(r.converted).length).length;
+    q('#xlsxInfo').className='xlsx-info '+(invalid?'warn':'good');q('#xlsxInfo').innerHTML=`<b>${rows.length} filas preparadas</b> desde «${esc(q('#xlsxSheetSelect').value)}». ${invalid?`${invalid} necesitan revisión. `:''}${converted?`${converted} se han convertido de cm/mm.`:''}`;
+    q('#xlsxPreviewBody').innerHTML=validation.slice(0,20).map(({row:r,index:i,errors})=>`<tr class="${errors.length?'bad':Object.keys(r.converted).length?'converted':''}"><td>${i+1}</td><td>${esc(rowLabel(r))}</td><td>${r.width===''?'—':fmt(r.width)}</td><td>${r.height===''?'—':fmt(r.height)}</td><td>${fmt(r.gather)}</td><td>${fmt(r.hem)}</td><td>${r.sheets}</td><td>${esc(r.notes)}${errors.length?`<br><b style="color:#b42318">${esc(errors.join(' · '))}</b>`:''}</td></tr>`).join('')+(rows.length>20?`<tr><td colspan="8">… y ${rows.length-20} filas más</td></tr>`:'');
+    q('#xlsxApplyBtn').disabled=!validation.some(item=>item.valid);q('#xlsxApplyBtn').dataset.rows=JSON.stringify(rows);
+  }
+  function applyXlsxImport(){
+    let rows=[];try{rows=JSON.parse(q('#xlsxApplyBtn').dataset.rows||'[]')}catch{}if(!rows.length)return;
+    const mode=q('#xlsxImportMode').value,validation=validateImportBatch(rows,mode),valid=validation.filter(item=>item.valid).map(item=>item.row),failed=validation.length-valid.length;if(!valid.length)return toast('No hay filas válidas para importar.',true);
+    checkpoint(`Importar archivo ${xlsxFileName}`);if(mode==='replace')state.rows=[];else state.rows=state.rows.filter(hasData);state.rows.push(...valid.map(r=>({...r,id:uid()})));while(state.rows.length<12)state.rows.push(blankRow(state.project));save(true,'excel');renderAll();closeModal('importModal');toast(`${valid.length} filas importadas desde ${xlsxFileName}${failed?`; ${failed} omitidas por errores`:''}`);
+  }
+
+  function download(name,content,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type}));a.download=name;document.body.append(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},400)}
+  function exportJSON(){download(`hoja-confeccion-${safeFileName(state.project.hotel)}.json`,JSON.stringify(state,null,2),'application/json');toast('Copia JSON exportada')}
+  function exportCSV(){const cols=['Bloque','Planta','Habitación','Ancho hueco (m)','Altura (m)','Fruncido','Bajo y cresta (m)','Nº hojas','Observaciones','Estado'];const vals=state.rows.filter(hasData).map(r=>[r.block??'',r.floor??'',r.room,r.width,r.height,r.gather,r.hem,r.sheets,r.notes||'',STATUS[r.status]?.label||'']);const csv='\ufeff'+[cols,...vals].map(row=>row.map(v=>`"${String(v??'').replace(/"/g,'""')}"`).join(';')).join('\r\n');download(`relacion-${safeFileName(state.project.hotel)}.csv`,csv,'text/csv;charset=utf-8');toast('CSV exportado')}
+  function exportXLSX(){
+    if(!xlsxAvailable()){toast('No se ha podido cargar el motor de Excel.',true);return}
+    const wb=XLSX.utils.book_new(),p=state.project,rows=readyRows();
+    const relation=[['HOJA DE CONFECCIÓN · RELACIÓN DE HUECOS'],['Obra / hotel',p.hotel,'Cliente',p.client,'Fecha',formatDate(p.date)],['Tela',p.fabricName,'Tipo',p.fabricType,'Confección',p.confectionType],[],['#','Bloque','Planta','Habitación','Ancho hueco (m)','Altura (m)','Fruncido','Bajo y cresta (m)','Nº hojas','Medida por hoja (m)','Metros tela (m)','Ancho corte (m)','Alto corte (m)','Estado','Observaciones']];
+    rows.forEach((r,i)=>{const c=calcRow(r);relation.push([i+1,r.block??'',r.floor??'',r.room,c.width,c.height,c.gather,num(r.hem),c.sheets,c.measurePerSheet,c.meters,c.cutWidth,c.cutHeight,STATUS[r.status]?.label,r.notes||''])});relation.push(['','','','','','','','','','','TOTAL',totals().meters]);
+    const ws1=XLSX.utils.aoa_to_sheet(relation);ws1['!merges']=[XLSX.utils.decode_range('A1:O1')];ws1['!cols']=[{wch:5},{wch:9},{wch:9},{wch:16},{wch:15},{wch:12},{wch:10},{wch:17},{wch:10},{wch:18},{wch:16},{wch:15},{wch:14},{wch:18},{wch:28}];XLSX.utils.book_append_sheet(wb,ws1,'RELACION');
+
+    const confeccion=[['HOJA DE CONFECCIÓN'],['Obra',p.hotel,'Fecha',formatDate(p.date),'Tela',p.fabricName],[],['Identificador','Ancho hueco','Altura hueco','Ancho por hoja','Alto final','Ancho corte','Alto corte','Nº hojas','m/hoja','Metros totales','Estado']];
+    rows.forEach(r=>{const c=calcRow(r);confeccion.push([rowLabel(r),c.width,c.height,c.panelWidth,c.finalHeight,c.sheetWidth,c.cutHeight,c.sheets,c.sheetMetersPerSheet,c.sheetMeters,STATUS[r.status]?.label])});const ws2=XLSX.utils.aoa_to_sheet(confeccion);ws2['!cols']=[{wch:15},{wch:13},{wch:13},{wch:15},{wch:13},{wch:13},{wch:13},{wch:10},{wch:11},{wch:14},{wch:18}];XLSX.utils.book_append_sheet(wb,ws2,'CONFECCION');
+
+    const cuts=[['TABLA DE CORTES'],['Obra',p.hotel,'Tela',p.fabricName],[],['Código','Ancho corte (m)','Alto corte (m)','Huecos','Paños','Metros tela','Habitaciones']];allGroupedCuts().forEach((g,i)=>cuts.push([`C-${String(i+1).padStart(2,'0')}`,g.width,g.height,g.windows,g.cuts,g.meters,g.rooms.join(', ')]));const ws3=XLSX.utils.aoa_to_sheet(cuts);ws3['!cols']=[{wch:10},{wch:17},{wch:16},{wch:10},{wch:10},{wch:14},{wch:45}];XLSX.utils.book_append_sheet(wb,ws3,'CORTES');
+
+    const rails=[['RIELES'],['Obra',p.hotel,'Fecha',formatDate(p.date),'Añadido cierre',num(p.closureAdd)||FIXED_CLOSURE_ADD],[],['Identificador','Ancho hueco','Riel visillo','Ud.','Riel oscurante (doble)','Ud.','Soportes','Escuadras']];railRows().forEach(x=>rails.push([rowLabel(x.r),x.width,x.final,1,x.dark,2,x.supports,'']));const ws4=XLSX.utils.aoa_to_sheet(rails);ws4['!cols']=[{wch:16},{wch:15},{wch:15},{wch:6},{wch:22},{wch:6},{wch:10},{wch:10}];XLSX.utils.book_append_sheet(wb,ws4,'RIELES');
+
+    const checklist=[['CHECK LIST'],...workflow.map((x,i)=>[i+1,x[0],x[1],state.checks['flow-'+i]?'COMPLETADO':'PENDIENTE'])];const ws5=XLSX.utils.aoa_to_sheet(checklist);ws5['!cols']=[{wch:5},{wch:30},{wch:65},{wch:16}];XLSX.utils.book_append_sheet(wb,ws5,'CHECK LIST');
+    XLSX.writeFile(wb,`hoja-confeccion-${safeFileName(p.hotel)}.xlsx`,{compression:true});toast('Libro Excel exportado');
+  }
+  function exportRailsXLSX(){
+    if(!xlsxAvailable()){toast('No se ha podido cargar el motor de Excel.',true);return}
+    const wb=XLSX.utils.book_new(),p=state.project,rows=railRows();
+    const simple=[['RIELES'],['Obra / hotel',p.hotel,'Fecha',formatDate(p.date)],[],['Identificador','Ancho hueco (m)','Medida final (m)','Soportes','Escuadras']];rows.forEach(x=>simple.push([rowLabel(x.r),x.width,x.final,x.supports,'']));const ws1=XLSX.utils.aoa_to_sheet(simple);ws1['!cols']=[{wch:16},{wch:15},{wch:15},{wch:10},{wch:10}];XLSX.utils.book_append_sheet(wb,ws1,'RIELES');
+    const dob=[['RIELES DOBLES'],['Obra / hotel',p.hotel,'Fecha',formatDate(p.date),'Descuento',fmt(p.railDeduction),'m','Añadido cierre',fmt(num(p.closureAdd)||FIXED_CLOSURE_ADD),'m'],[],['Identificador','Ancho hueco (m)','Riel visillo (m)','Ud.','Riel oscurante (m)','Ud.','Soportes','Escuadras']];rows.forEach(x=>dob.push([rowLabel(x.r),x.width,x.final,1,x.dark,2,x.supports,'']));const ws2=XLSX.utils.aoa_to_sheet(dob);ws2['!cols']=[{wch:16},{wch:15},{wch:15},{wch:6},{wch:18},{wch:6},{wch:10},{wch:10}];XLSX.utils.book_append_sheet(wb,ws2,'RIELES DOBLES');
+    XLSX.writeFile(wb,`rieles-${safeFileName(p.hotel)}.xlsx`,{compression:true});toast('Rieles exportados a Excel');
+  }
+  function importFile(file){
+    const ext=file.name.toLowerCase().split('.').pop();if(['xlsx','xls'].includes(ext)){openXlsxImport();setTimeout(()=>loadXlsxFile(file),100);return}
+    const reader=new FileReader();reader.onload=()=>{try{checkpoint(`Importar ${file.name}`);const text=String(reader.result);if(ext==='json'){const x=JSON.parse(text);if(!x.project||!Array.isArray(x.rows))throw new Error('JSON no válido');state=normalizeState(x);state.jobId=currentJob()?.id||state.jobId}else parseCSV(text);save();closeModal('importModal');renderAll();toast('Archivo importado')}catch(e){toast(e.message||'No se pudo importar',true)}};reader.readAsText(file,'utf-8');
+  }
+
+  function applyDefaults(){checkpoint('Aplicar Nº de hojas a todas las filas');for(const r of state.rows){r.sheets=state.project.mode;r.updatedAt=new Date().toISOString()}save();renderDynamic();toast('Nº de hojas aplicado a todas las filas')}
+  async function resetAll(){
+    const count=state.rows.filter(hasData).length;
+    const ok=await askConfirm({title:'Vaciar relación',message:`Se enviarán ${count} fila${count===1?'':'s'} a la papelera. Podrás restaurarlas desde allí.`,confirmLabel:'Vaciar',danger:true});
+    if(!ok)return;
+    const ids=state.rows.filter(hasData).map(r=>r.id);trashRows(ids);
+  }
+  function buildCoverPage(viewName){
+    const p=state.project||{};
+    const t=totals();
+    const titles={
+      'relacion':'Relación de huecos',
+      'confeccion':'Hojas de confección',
+      'corte':'Cuadrante de corte',
+      'resumen':'Resumen de cortes',
+      'etiquetas':'Etiquetas de paños',      'rieles':'Rieles',
+      'rielesdobles':'Rieles dobles',
+      'revisar':'Revisión y pedido',
+      'produccion':'Seguimiento de producción',
+      'resumen':'Resumen'
+    };
+    const title=titles[viewName]||'Documento de confección';
+    const subtipos={
+      'confeccion':'Hojas para taller de costura',
+      'corte':'Hoja para puesto de corte',
+      'etiquetas':'Etiquetas para marcar los paños cortados',      'relacion':'Listado de medidas y confección'
+    };
+    const subtitle=subtipos[viewName]||'';
+    const today=new Date().toISOString().slice(0,10);
+    const el=document.createElement('article');
+    el.className='paper cover-page no-screen';
+    el.setAttribute('data-pdf-cover','1');
+    el.innerHTML=`
+      <div class="pdf-source"><span class="pdf-hotel">${esc(p.hotel||'Obra sin nombre')}</span><span class="pdf-date">${esc(formatDate(p.date))}</span></div>
+      <div class="cover-content">
+        <div>
+          <div class="cover-brand">Confección Central</div>
+          <h1 class="cover-title">${esc(title)}</h1>
+          ${subtitle?`<p class="cover-subtitle">${esc(subtitle)}</p>`:''}
+        </div>
+        <div class="cover-project">
+          <div class="cover-field"><b>Obra / Hotel</b><span>${esc(p.hotel||'—')}</span></div>
+          <div class="cover-field"><b>Cliente</b><span>${esc(p.client||'—')}</span></div>
+          <div class="cover-field"><b>Fecha</b><span>${esc(formatDate(p.date))}</span></div>
+          <div class="cover-field"><b>Costurera</b><span>${esc(p.seamstress||'—')}</span></div>
+          <div class="cover-field"><b>Tela</b><span>${esc(p.fabricName||p.fabricType||'—')}</span></div>
+          <div class="cover-field"><b>Ancho de tela</b><span>${fmt(p.fabricWidth)} m</span></div>
+          <div class="cover-field"><b>Tipo confección</b><span>${esc(p.confectionType||'—')}</span></div>
+          <div class="cover-field"><b>Garfios</b><span>${esc(p.hooks||'—')}</span></div>
+        </div>
+        <div class="cover-totals">
+          <div class="cover-stat"><span>Habitaciones</span><strong>${readyRows().length}</strong></div>
+          <div class="cover-stat"><span>Metros totales</span><strong>${fmt(t.meters)} m</strong></div>
+          <div class="cover-stat"><span>Paños</span><strong>${t.sheets||0}</strong></div>
+          <div class="cover-stat accent"><span>Total estimado</span><strong>${fmt(t.total||0)} €</strong></div>
+        </div>
+        <div class="cover-signature">
+          <div>Responsable del taller</div>
+          <div>Recibido por</div>
+        </div>
+        <div class="cover-footer">Documento generado el ${esc(today)} · Confección Central · ${window.APP_CONFIG&&window.APP_CONFIG.version?'v'+window.APP_CONFIG.version:''}</div>
+      </div>
+    `;
+    return el;
+  }
+  function showSavePdfHint(){
+    try{
+      if(localStorage.getItem('egea-pdf-hint-shown')==='1')return;
+    }catch{}
+    toast('En el diálogo de impresión elige "Guardar como PDF" como destino');
+    try{localStorage.setItem('egea-pdf-hint-shown','1')}catch{}
+  }
+  function printView(name){
+    const view=q('#view-'+name);if(!view)return;
+    qa('.view').forEach(v=>v.classList.remove('printing'));
+    view.classList.add('printing');
+    // Inyecta portada sólo si la vista tiene contenido imprimible.
+    const printable=view.querySelector('.paper,.sheet-preview,.labels-grid,.cut-cards,.central-sketch-grid');
+    let cover=null;
+    if(printable){
+      cover=buildCoverPage(name);
+      view.insertBefore(cover,view.firstChild);
+    }
+    showSavePdfHint();
+    window.print();
+    setTimeout(()=>{
+      view.classList.remove('printing');
+      if(cover&&cover.parentNode)cover.parentNode.removeChild(cover);
+    },500);
+  }
+  // Impresión a impresora de etiquetas (Zebra y similares): una etiqueta por página,
+  // tamaño exacto de etiqueta (40×60 mm) definido por @page zebra-label.
+  function printLabelsZebra(){
+    const view=q('#view-etiquetas');if(!view)return;
+    qa('.view').forEach(v=>v.classList.remove('printing'));
+    view.classList.add('printing');
+    // Tamaño elegido en el toolbar: define la página y las medidas de la etiqueta en impresión.
+    const size=String(q('#zebraLabelSize')?.value||'40x60').toLowerCase().replace(/[^a-z0-9]/g,'');
+    document.body.classList.remove('zebra-40x60','zebra-40x50','zebra-40x80','zebra-50x60','zebra-60x60');
+    document.body.classList.add('zebra-print','zebra-'+size);
+    window.print();
+    setTimeout(()=>{
+      document.body.classList.remove('zebra-print','zebra-'+size);
+      view.classList.remove('printing');
+    },500);
+  }
+  function setWorkflowActive(step){state.activeStep=Number(step)||1;qa('[data-workflow-step]').forEach(b=>b.classList.toggle('active',Number(b.dataset.workflowStep)===state.activeStep))}
+  function goToStep(step){step=Number(step);setWorkflowActive(step);if(step===1||step===2){switchView('relacion');setTimeout(()=>{const target=step===1?q('[data-step-anchor="1"]'):q('[data-step-anchor="2"]');target?.scrollIntoView({behavior:'smooth',block:'start'})},80)}else if(step===3)switchView('resumen');else switchView('confeccion');save()}
+  function switchView(name,saveIt=true){state.activeView=name;qa('.view').forEach(v=>v.classList.toggle('active',v.id==='view-'+name));qa('.nav-btn').forEach(b=>b.classList.toggle('active',b.dataset.view===name));if(name==='resumen'||name==='corte'||name==='revisar'||name==='produccion'||name==='etiquetas')setWorkflowActive(3);else if(name==='confeccion')setWorkflowActive(4);else if(name==='relacion'&&![1,2].includes(Number(state.activeStep)))setWorkflowActive(2);if(dirtyViews.has(name))renderDependent(name==='relacion');if(saveIt)save();window.scrollTo({top:0,behavior:'smooth'})}
+  /* Render selectivo: solo se repinta la vista activa; las ocultas esperan
+     a estar "sucias" (dirty) para repintarse, y siempre antes de mostrarse. */
+  function renderDependent(includeRelation=true){
+    syncInputs();renderKpis();
+    const runners={
+      relacion:()=>{renderCostKpis();renderValidationBar();renderBulkBar();if(includeRelation)renderRelation();renderRelationPrint()},
+      confeccion:renderConfection,
+      corte:renderCutTable,
+      resumen:renderCutSummary,
+      revisar:renderReview,
+      rieles:renderRails,
+      produccion:renderProduction,
+      etiquetas:renderLabels,
+      checklist:renderChecklist
+    };
+    for(const name of ALL_VIEWS){
+      if(name===state.activeView||dirtyViews.has(name)){runners[name]();dirtyViews.delete(name)}
+    }
+  }
+  function renderDynamic(){renderDependent(true)}
+  function renderAll(){markAllDirty();renderDynamic();switchView(state.activeView||'relacion',false);updateUndoButtons()}
+
+  function copySelectedToClipboard(){
+    const rows=state.rows.filter(r=>selectedIds.has(r.id));if(!rows.length)return;
+    const text=[['Bloque','Planta','Habitación','Ancho hueco (m)','Altura (m)','Fruncido','Bajo y cresta (m)','Nº hojas','Observaciones','Estado'],...rows.map(r=>[r.block??'',r.floor??'',r.room,r.width,r.height,r.gather,r.hem,r.sheets,r.notes||'',STATUS[r.status]?.label])].map(x=>x.join('\t')).join('\n');
+    navigator.clipboard?.writeText(text).then(()=>toast('Filas copiadas para pegar en Excel')).catch(()=>download('filas-copiadas.tsv',text,'text/tab-separated-values'));
+  }
+  function applyBulk(){
+    const ids=[...selectedIds];if(!ids.length)return;checkpoint('Edición masiva');
+    const gather=q('#bulkGather').value.trim(),hem=q('#bulkHem').value.trim(),sheets=q('#bulkSheets').value.trim(),status=q('#bulkStatus').value;
+    state.rows.forEach(r=>{if(!selectedIds.has(r.id))return;if(gather!=='')r.gather=num(gather);if(hem!==''){const d=parseDimension(hem);r.hem=d.value;if(d.converted)r.converted.hem=d.source}if(sheets!=='')r.sheets=Math.max(1,Math.round(num(sheets)));if(status)r.status=status;r.updatedAt=new Date().toISOString()});
+    save();renderAll();toast('Cambios aplicados a las filas seleccionadas');
+  }
+  function duplicateSelected(){
+      const rows=state.rows.filter(r=>selectedIds.has(r.id));if(!rows.length)return;checkpoint('Duplicar filas');const insert=[];rows.forEach(r=>insert.push({...deepClone(r),id:uid(),room:'',status:'',createdAt:new Date().toISOString()}));state.rows=state.rows.filter(hasData).concat(insert);while(state.rows.length<12)state.rows.push(blankRow(state.project));selectedIds.clear();save();renderAll();toast(`${rows.length} filas duplicadas`);
+  }
+  function normalizeRowField(r,key){
+    const before=JSON.stringify({value:r[key],converted:r.converted?.[key]||''});
+    if(['width','height','hem'].includes(key)){
+      const d=parseDimension(r[key]);r[key]=d.value;if(d.converted)r.converted[key]=d.source;else delete r.converted[key];
+    }else if(key==='sheets')r.sheets=Math.max(1,Math.round(num(r.sheets)||state.project.mode));
+    else if(key==='gather')r.gather=round(num(r.gather),2);
+    const after=JSON.stringify({value:r[key],converted:r.converted?.[key]||''});
+    if(before!==after)r.updatedAt=new Date().toISOString();
+  }
+
+  function initEvents(){
+    qa('.nav-btn').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));qa('[data-view-jump]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.viewJump)));
+    qa('[data-workflow-step]').forEach(b=>b.addEventListener('click',()=>goToStep(b.dataset.workflowStep)));
+    qa('.mode-switch button').forEach(b=>b.addEventListener('click',()=>setMode(b.dataset.mode)));
+    bindProjectInputs();
+    bindConfectionDefaultsApply();
+
+    q('#saveBtn')?.addEventListener('click',()=>saveVersion('Versión manual'));
+    q('#undoBtn')?.addEventListener('click',undo);q('#redoBtn')?.addEventListener('click',redo);
+    q('#jobsBtn')?.addEventListener('click',()=>{renderJobs();openModal('jobsModal')});
+    q('#sidebarJobsBtn')?.addEventListener('click',()=>{renderJobs();openModal('jobsModal')});
+    q('#sidebarNewJobBtn')?.addEventListener('click',()=>newJob());
+    q('#newJobBtn')?.addEventListener('click',()=>{closeModal('jobsModal');newJob();});
+    qa('[data-newjob-source]').forEach(b=>b.addEventListener('click',()=>{
+      newJobSource=b.dataset.newjobSource;
+      qa('.new-job-option').forEach(x=>x.classList.toggle('selected',x===b));
+      _refreshNewJobPickers();
+    }));
+    q('#newJobCreateBtn')?.addEventListener('click',createNewJobFromModal);
+    q('#newJobName')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();createNewJobFromModal()}});
+    q('#templatesBtn')?.addEventListener('click',()=>{renderTemplates();openModal('templatesModal')});
+    q('#historyBtn')?.addEventListener('click',()=>{renderHistory();openModal('historyModal')});
+    q('#trashBtn')?.addEventListener('click',()=>{renderTrash();openModal('trashModal')});
+    q('#exportBtn')?.addEventListener('click',()=>openModal('exportModal'));
+    q('#importBtn')?.addEventListener('click',()=>openModal('importModal'));
+    q('#openImportModalBtn')?.addEventListener('click',()=>openImportTab('paste'));
+    qa('[data-import-tab]').forEach(b=>b.addEventListener('click',()=>openImportTab(b.dataset.importTab)));
+    qa('[data-rail-view]').forEach(btn=>btn.addEventListener('click',()=>{
+      qa('[data-rail-view]').forEach(b=>{const active=b===btn;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active))});
+      qa('[data-rail-panel]').forEach(p=>p.hidden=p.dataset.railPanel!==btn.dataset.railView);
+    }));
+    q('#printRailsBtn')?.addEventListener('click',()=>printView('rieles'));
+    q('#exportRailsBtn')?.addEventListener('click',exportRailsXLSX);
+    q('#csvBtn')?.addEventListener('click',exportCSV);
+    q('#pasteExcelBtn')?.addEventListener('click',openExcelPaste);
+    q('#importXlsxBtn')?.addEventListener('click',openXlsxImport);
+
+    // Menú "Más" de la topbar
+    const moreBtn=q('#moreMenuBtn');const moreMenu=q('#moreMenu');
+    if(moreBtn&&moreMenu){
+      moreBtn.addEventListener('click',e=>{e.stopPropagation();const open=!moreMenu.hidden;moreMenu.hidden=open;moreBtn.setAttribute('aria-expanded',String(!open))});
+      document.addEventListener('click',e=>{if(!moreMenu.contains(e.target)&&e.target!==moreBtn)moreMenu.hidden=true});
+      moreMenu.querySelectorAll('[data-more-action]').forEach(b=>b.addEventListener('click',()=>{
+        const act=b.dataset.moreAction;moreMenu.hidden=true;moreBtn.setAttribute('aria-expanded','false');
+        const map={jobs:()=>{renderJobs();openModal('jobsModal')},templates:()=>{renderTemplates();openModal('templatesModal')},save:()=>saveVersion('Versión manual'),import:()=>openModal('importModal'),export:()=>openModal('exportModal'),history:()=>{renderHistory();openModal('historyModal')},trash:()=>{renderTrash();openModal('trashModal')},checklist:()=>switchView('checklist')};
+        if(map[act])map[act]();
+      }));
+    }
+
+    qa('[data-close]').forEach(b=>b.addEventListener('click',()=>closeModal(b.dataset.close)));
+    qa('.modal-backdrop').forEach(m=>m.addEventListener('click',e=>{if(e.target===m)m.classList.remove('open')}));
+
+    q('#excelAnalyzeBtn').addEventListener('click',()=>{try{renderExcelPreview(analyzeExcelPaste(q('#excelPasteText').value,q('#excelHeaderMode').value))}catch(e){excelPasteResult=null;q('#excelApplyBtn').disabled=true;q('#excelPreviewInfo').className='excel-preview-info warn';q('#excelPreviewInfo').textContent=e.message||'No se pudieron analizar los datos'}});
+    q('#excelPasteText').addEventListener('paste',()=>setTimeout(()=>{try{renderExcelPreview(analyzeExcelPaste(q('#excelPasteText').value,q('#excelHeaderMode').value))}catch{}},30));
+    q('#excelHeaderMode').addEventListener('change',()=>{if(q('#excelPasteText').value.trim())q('#excelAnalyzeBtn').click()});q('#excelImportMode').addEventListener('change',()=>{if(q('#excelPasteText').value.trim())q('#excelAnalyzeBtn').click()});q('#excelApplyBtn').addEventListener('click',importExcelPaste);
+    q('#clearExcelPasteBtn').addEventListener('click',()=>{q('#excelPasteText').value='';excelPasteResult=null;q('#excelApplyBtn').disabled=true;q('#excelPreviewInfo').className='excel-preview-info';q('#excelPreviewInfo').textContent='Pegue datos y pulse «Analizar y previsualizar».';q('#excelPreviewBody').innerHTML='<tr><td colspan="8" style="padding:28px;color:#7b8596">Sin datos analizados</td></tr>';q('#excelPasteText').focus()});
+    q('#copyExcelTemplateBtn').addEventListener('click',async()=>{const template='Habitación\tAncho hueco (m)\tAltura (m)\tFruncido\tBajo y cresta (m)\tNº hojas\tObservaciones';try{await navigator.clipboard.writeText(template);toast('Cabecera modelo copiada')}catch{q('#excelPasteText').value=template}});
+
+    q('#importBackupChoice')?.addEventListener('click',()=>q('#importFile').click());
+    q('#importFile').addEventListener('change',e=>{const f=e.target.files[0];if(f)importFile(f);e.target.value=''});
+
+    q('#xlsxFileInput')?.addEventListener('change',e=>e.target.files[0]&&loadXlsxFile(e.target.files[0]));
+    q('#xlsxSheetSelect')?.addEventListener('change',e=>prepareXlsxSheet(e.target.value));
+    q('#xlsxHeaderRow')?.addEventListener('change',()=>{const idx=Math.max(0,Number(q('#xlsxHeaderRow').value||1)-1);populateMapping(idx);renderXlsxPreview()});
+    qa('[id^="map-"]').forEach(el=>el.addEventListener('change',renderXlsxPreview));
+    q('#xlsxImportMode')?.addEventListener('change',renderXlsxPreview);
+    q('#xlsxApplyBtn')?.addEventListener('click',applyXlsxImport);
+
+    q('#exportJsonBtn')?.addEventListener('click',()=>{exportJSON();closeModal('exportModal')});q('#exportCsvBtn')?.addEventListener('click',()=>{exportCSV();closeModal('exportModal')});q('#exportXlsxBtn')?.addEventListener('click',()=>{exportXLSX();closeModal('exportModal')});q('#exportPdfBtn')?.addEventListener('click',()=>{closeModal('exportModal');printView(state.activeView)});
+
+    q('#newJobBtn')?.addEventListener('click',newJob);q('#saveTemplateBtn')?.addEventListener('click',saveCustomTemplate);q('#saveVersionBtn')?.addEventListener('click',()=>saveVersion('Versión desde historial'));
+    q('#printActiveBtn').addEventListener('click',()=>printView(state.activeView));qa('[data-print]').forEach(b=>b.addEventListener('click',()=>printView(b.dataset.print)));
+    q('#applyDefaultsBtn').addEventListener('click',applyDefaults);
+    q('#addRowBtn').addEventListener('click',()=>{checkpoint('Añadir fila');state.rows.push(blankRow(state.project));save();renderRelation();setTimeout(()=>q('#relationTable tbody tr:last-child input[data-key="room"]')?.focus(),0)});
+    q('#addRowsBtn').addEventListener('click',()=>{checkpoint('Añadir 5 filas');state.rows.push(...Array.from({length:5},()=>blankRow(state.project)));save();renderRelation();toast('5 filas añadidas')});
+    q('#clearRowsBtn').addEventListener('click',resetAll);q('#rowSearch').addEventListener('input',debounce(renderRelation,120));q('#confectionSearch').addEventListener('input',debounce(renderConfection,120));
+    document.addEventListener('click',async e=>{
+      const scopeBtn=e.target.closest('[data-job-scope]');
+      if(scopeBtn){jobScope=scopeBtn.dataset.jobScope==='others'?'others':'mine';renderJobs();if(jobScope==='others'&&!jobsData.othersLoaded&&centralOthersLoader)await centralOthersLoader();return}
+      const f=e.target.closest('[data-job-filter]');if(f){state.jobFilter=f.dataset.jobFilter;renderJobs();return}
+    });
+    q('#cutSort')?.addEventListener('change',renderCutTable);
+    qa('.cut-tabs [data-cut-view]').forEach(btn=>btn.addEventListener('click',()=>{
+      qa('.cut-tabs [data-cut-view]').forEach(b=>{const active=b===btn;b.classList.toggle('active',active);b.setAttribute('aria-selected',String(active))});
+      const v=btn.dataset.cutView;
+      qa('[data-cut-panel]').forEach(p=>p.hidden=p.dataset.cutPanel!==v);
+    }));
+    q('#configToggle').addEventListener('click',()=>{state.configOpen=!state.configOpen;save();syncInputs()});q('#collapseConfigBtn').addEventListener('click',()=>{state.configOpen=false;save();syncInputs()});q('#costToggle').addEventListener('click',()=>{state.costsOpen=!state.costsOpen;save();syncInputs()});
+
+    document.addEventListener('focusin',e=>{const target=e.target.closest('[data-row],[data-project]');if(target)beginEdit(target)});
+    q('#relationTable tbody').addEventListener('input',e=>{
+      const el=e.target.closest('input[data-row]');if(!el)return;const r=state.rows.find(x=>x.id===el.dataset.row);if(!r)return;r[el.dataset.key]=el.value;save();renderDependent(false);
+      const tr=el.closest('tr'),c=calcRow(r);if(tr){tr.cells[9].textContent=fmt(c.measurePerSheet);tr.cells[10].textContent=fmt(c.meters);syncRowVisual(r,tr)}
+    });
+    q('#relationTable tbody').addEventListener('focusout',e=>{
+      const el=e.target.closest('input[data-row]');if(!el)return;const r=state.rows.find(x=>x.id===el.dataset.row);if(!r)return;normalizeRowField(r,el.dataset.key);finishEdit(`Editar ${el.dataset.key}`);el.value=r[el.dataset.key]??'';save();renderDependent(false);syncRowVisual(r,el.closest('tr'));setTimeout(()=>{if(!q('#relationTable tbody input:focus'))renderRelation()},180);
+    });
+    q('#relationTable tbody').addEventListener('keydown',e=>{
+      const el=e.target.closest('input[data-row]');if(!el)return;const rowIndex=state.rows.findIndex(r=>r.id===el.dataset.row),keyIndex=EDITABLE_KEYS.indexOf(el.dataset.key);
+      if(e.key==='Enter'){e.preventDefault();let next=rowIndex+(e.shiftKey?-1:1);if(next<0)return;if(next>=state.rows.length){state.rows.push(blankRow(state.project));save();renderRelation()}setTimeout(()=>q(`#relationTable input[data-row="${state.rows[next].id}"][data-key="${el.dataset.key}"]`)?.focus(),0)}
+      else if(e.key==='Tab'&&!e.shiftKey&&keyIndex===EDITABLE_KEYS.length-1){e.preventDefault();let next=rowIndex+1;if(next>=state.rows.length){state.rows.push(blankRow(state.project));save();renderRelation()}setTimeout(()=>q(`#relationTable input[data-row="${state.rows[next].id}"][data-key="${state.project.useBlockFloor?'block':'room'}"]`)?.focus(),0)}
+    });
+    q('#relationTable tbody').addEventListener('paste',e=>{
+      const el=e.target.closest('input[data-row]');if(!el)return;const raw=e.clipboardData?.getData('text/plain')||'';if(!raw.includes('\t')&&!raw.includes('\n'))return;e.preventDefault();checkpoint('Pegar desde Excel en la tabla');const startRow=state.rows.findIndex(r=>r.id===el.dataset.row),startCol=EDITABLE_KEYS.indexOf(el.dataset.key);let imported=0;
+      try{const analyzed=analyzeExcelPaste(raw,'auto');if(analyzed.hasHeader){while(state.rows.length<startRow+analyzed.rows.length)state.rows.push(blankRow(state.project));analyzed.rows.forEach((row,ri)=>{state.rows[startRow+ri]={...state.rows[startRow+ri],...row,id:state.rows[startRow+ri].id}});imported=analyzed.rows.length}else throw new Error('Sin encabezado')}
+      catch{const matrix=splitExcelText(raw);while(state.rows.length<startRow+matrix.length)state.rows.push(blankRow(state.project));matrix.forEach((cells,ri)=>cells.forEach((value,ci)=>{const key=EDITABLE_KEYS[startCol+ci];if(!key)return;const r=state.rows[startRow+ri];if(['width','height','hem'].includes(key)){const d=parseDimension(value);r[key]=d.value;if(d.converted)r.converted[key]=d.source}else r[key]=NUMERIC_KEYS.has(key)?(String(value).trim()===''?'':num(value)):String(value).trim()}));imported=matrix.length}
+      save();renderAll();toast(`${imported} filas pegadas desde Excel`);
+    });
+
+    q('#selectAllRows')?.addEventListener('change',e=>{qa('[data-select-row]').forEach(cb=>{cb.checked=e.target.checked;e.target.checked?selectedIds.add(cb.dataset.selectRow):selectedIds.delete(cb.dataset.selectRow)});renderBulkBar()});
+
+    document.addEventListener('input',e=>{
+      if(e.target.id==='productionSearch')searchProduction();
+      if(e.target.id==='labelSearch')searchLabels();
+      if(e.target.id==='cutSearch')searchCuts();
+    });
+    document.addEventListener('change',e=>{
+      if(e.target.matches('[data-select-row]')){e.target.checked?selectedIds.add(e.target.dataset.selectRow):selectedIds.delete(e.target.dataset.selectRow);renderBulkBar();return}
+      if(e.target.matches('[data-check]')){state.checks[e.target.dataset.check]=e.target.checked;save();return}
+      if(e.target.id==='cutSort'){renderCutSummary();return}
+      if(e.target.matches('[data-production-status]')){checkpoint('Cambiar estado de producción');const r=state.rows.find(x=>x.id===e.target.dataset.productionStatus);if(r)r.status=e.target.value;save();renderAll();return}
+      if(e.target.id==='productionStatusFilter'){state.productionFilter=e.target.value;renderProduction();return}
+      if(e.target.id==='labelStatusFilter'){state.labelFilter=e.target.value;renderLabels();return}
+      if(e.target.id==='zebraLabelSize'){state.zebraLabelSize=e.target.value;renderLabels();return}
+    });
+
+    document.addEventListener('click',e=>{
+      const b=e.target.closest('button');if(!b)return;
+      if(b.dataset.rowAction){const i=state.rows.findIndex(x=>x.id===b.dataset.id);if(i<0)return;if(b.dataset.rowAction==='delete')trashRows([b.dataset.id]);else{checkpoint('Duplicar fila');const copy={...deepClone(state.rows[i]),id:uid(),room:'',status:''};state.rows.splice(i+1,0,copy);save();renderAll()}return}
+      if(b.dataset.cycleStatus){const r=state.rows.find(x=>x.id===b.dataset.cycleStatus);if(r){checkpoint('Cambiar estado de producción');const order=['','measured','cut','sewn','installed'];r.status=order[(order.indexOf(r.status)+1)%order.length];r.updatedAt=new Date().toISOString();save();renderAll();toast(r.status?`Estado: ${STATUS[r.status].label}`:'Estado: sin estado')}return}
+      if(b.dataset.gotoIssue){goToIssue(b.dataset.gotoIssue);return}
+      if(b.dataset.gotoView){switchView(b.dataset.gotoView);return}
+      if(b.dataset.emptyAction==='import'){openImportTab('paste');return}
+      if(b.dataset.emptyAction==='add-row'){q('#addRowBtn')?.click();return}
+      if(b.id==='bulkApplyBtn'){applyBulk();return}if(b.id==='bulkDuplicateBtn'){duplicateSelected();return}if(b.id==='bulkDeleteBtn'){trashRows([...selectedIds]);return}if(b.id==='bulkClearBtn'){selectedIds.clear();renderRelation();return}if(b.id==='bulkCopyBtn'){copySelectedToClipboard();return}
+      if(b.dataset.nextStatus){checkpoint('Avanzar producción');const r=state.rows.find(x=>x.id===b.dataset.nextStatus);if(r)r.status=b.dataset.status;save();renderAll();return}
+      if(b.dataset.jobOpen){openJob(b.dataset.jobOpen);return}if(b.dataset.jobDuplicate){duplicateJob(b.dataset.jobDuplicate);return}if(b.dataset.jobDelete){deleteJob(b.dataset.jobDelete);return}if(b.dataset.jobClose){closeJob(b.dataset.jobClose);return}if(b.dataset.jobReopen){reopenJobFn(b.dataset.jobReopen);return}
+      if(b.dataset.recentJob){openJob(b.dataset.recentJob);return}
+      if(b.dataset.templateApply){applyTemplate(b.dataset.templateApply,b.dataset.templateCustom==='1');return}if(b.dataset.templateDelete){deleteCustomTemplate(b.dataset.templateDelete);return}
+      if(b.dataset.trashRestore){restoreTrash(b.dataset.trashRestore);return}if(b.dataset.trashRemove){removeTrash(b.dataset.trashRemove);return}
+      if(b.dataset.versionRestore){restoreVersion(b.dataset.jobId,b.dataset.versionRestore);return}
+    });
+
+    q('#resetChecksBtn').addEventListener('click',()=>{checkpoint('Reiniciar check list');state.checks={};save();renderChecklist()});
+    q('#printLabelsBtn')?.addEventListener('click',()=>printView('etiquetas'));
+    q('#printLabelsZebraBtn')?.addEventListener('click',()=>printLabelsZebra());
+    q('#zplBtn')?.addEventListener('click',()=>showZpl());
+    q('#sendZebraBtn')?.addEventListener('click',()=>sendToZebra());
+    q('#zplCopyBtn')?.addEventListener('click',async()=>{
+      const v=q('#zplOutput')?.value||'';if(!v){toast('No hay código ZPL que copiar');return}
+      try{await navigator.clipboard.writeText(v);toast('ZPL copiado al portapapeles')}
+      catch{toast('No se pudo copiar automáticamente; usa Ctrl+A y Ctrl+C')}
+    });
+    q('#zplDownloadBtn')?.addEventListener('click',()=>{
+      const v=q('#zplOutput')?.value||'';if(!v){toast('No hay código ZPL que descargar');return}
+      const blob=new Blob([v],{type:'text/plain;charset=utf-8'});
+      const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=safeFileName(`etiquetas_${state.project.hotel||'trabajo'}`)+'.prn';a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+    });
+    // Escape cierra modales abiertos y menús desplegables (askModal gestiona el suyo en captura).
+    document.addEventListener('keydown',e=>{
+      if(e.key!=='Escape')return;
+      const more=q('#moreMenu');
+      if(more&&!more.hidden){more.hidden=true;q('#moreMenuBtn')?.setAttribute('aria-expanded','false');return}
+      const open=[...qa('.modal-backdrop.open')].filter(m=>m.id!=='askModal');
+      if(open.length)open[open.length-1].classList.remove('open');
+    });
+    window.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?redo():undo()}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='y'){e.preventDefault();redo()}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();saveVersion('Versión con Ctrl+S')}});
+    window.addEventListener('beforeunload',persistNow);
+    setTimeout(()=>{const note=q('#xlsxOfflineNote');if(note&&!xlsxAvailable())note.classList.add('show')},1800);
+  }
+
+  window.EgeaApp={
+    getState:()=>deepClone(state),
+    getCurrentJob:()=>deepClone(currentJob()||{id:state.jobId,name:state.project.hotel||'Trabajo sin nombre',state,versions:[]}),
+    getJobsData:()=>deepClone(jobsData),
+    setJobsData:(data)=>{
+      if(!data||!Array.isArray(data.jobs)||!data.jobs.length)return;
+      // Si estamos viendo un trabajo de un compañero (solo lectura), no salte a otro trabajo al refrescar.
+      const keepReadonly=viewOnlyJobId&&state?.jobId===viewOnlyJobId;
+      jobsData=deepClone({...data,others:jobsData.others||[],othersLoaded:jobsData.othersLoaded||false});
+      if(keepReadonly){renderJobs();return;}
+      const job=jobsData.jobs.find(j=>j.id===jobsData.currentId)||jobsData.jobs[0];
+      jobsData.currentId=job.id;
+      state=normalizeState(deepClone(job.state));state.jobId=job.id;
+      selectedIds.clear();undoStack=[];redoStack=[];persistNow();renderAll();renderJobs();
+    },
+    setOthersJobs:(items)=>{
+      jobsData.others=(items||[]).map(item=>({
+        id:item.id,name:item.name,updatedAt:item.updated_at,state:item.state,versions:item.versions||[],
+        owner:item.created_by?.name||'Sin asignar',
+      }));
+      jobsData.othersLoaded=true;
+      renderJobs();
+    },
+    setOthersLoader:(fn)=>{centralOthersLoader=fn},
+    setJobScope:(scope)=>{jobScope=scope==='others'?'others':'mine'},
+    getJobScope:()=>jobScope,
+    isReadOnlyJob:(id)=>Boolean(viewOnlyJobId&&viewOnlyJobId===id),
+    refreshJobsList:()=>renderJobs(),
+    // Aplica un estado externo al trabajo indicado (usado para restaurar drafts locales).
+    applyJobState:({jobId,state:externalState,job:meta}={})=>{
+      if(!jobId||!externalState)return false;
+      const i=jobsData.jobs.findIndex(j=>j.id===jobId);
+      const normalized=normalizeState(deepClone(externalState));normalized.jobId=jobId;
+      if(i>=0){
+        jobsData.jobs[i].state=deepClone(normalized);
+        if(meta?.name)jobsData.jobs[i].name=meta.name;
+        if(meta?.versions)jobsData.jobs[i].versions=meta.versions;
+      }else{
+        jobsData.jobs.unshift({id:jobId,name:meta?.name||'Trabajo sin nombre',updatedAt:new Date().toISOString(),state:deepClone(normalized),versions:meta?.versions||[]});
+      }
+      jobsData.currentId=jobId;
+      state=normalized;state.jobId=jobId;
+      selectedIds.clear();undoStack=[];redoStack=[];persistNow();renderAll();renderJobs();
+      return true;
+    },
+    upsertRemoteJob:(remote)=>{
+      if(!remote?.id)return;
+      const job={id:remote.id,name:remote.name||'Trabajo sin nombre',updatedAt:remote.updated_at||new Date().toISOString(),state:remote.state||defaultState(),versions:remote.versions||[]};
+      const i=jobsData.jobs.findIndex(j=>j.id===job.id);if(i>=0)jobsData.jobs[i]=job;else jobsData.jobs.unshift(job);
+      if(job.id===state.jobId){state=normalizeState(deepClone(job.state));state.jobId=job.id;renderAll()}
+      renderJobs();
+    },
+    clearSensitiveState:()=>{
+      for(const key of [JOBS_KEY,STORAGE_KEY,LEGACY_KEY])localStorage.removeItem(key);
+      // Limpia los drafts locales (egea-draft-v1:*) que dejó una sesión previa.
+      try{for(let i=localStorage.length-1;i>=0;i--){const k=localStorage.key(i);if(k&&k.startsWith('egea-draft-v1:'))localStorage.removeItem(k)}}catch{}
+      const fresh=normalizeState(defaultState()),job={id:fresh.jobId,name:'Trabajo sin nombre',updatedAt:new Date().toISOString(),state:fresh,versions:[]};
+      jobsData={currentId:job.id,jobs:[job]};state=fresh;selectedIds.clear();undoStack=[];redoStack=[];renderAll();renderJobs();
+    },
+    newJob,openJob,renderAll,renderJobs,switchView,toast,askConfirm,askText,
+    calculateRow:(row,project)=>{const old=state.project;state.project=Object.assign({},old,project||{});const result=calcRow(row);state.project=old;return result;},
+    getReadyRows:()=>deepClone(readyRows()),
+    getDataRows:()=>deepClone(dataRows())
+  };
+
+  initEvents();renderAll();
+})();
+

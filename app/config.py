@@ -99,11 +99,6 @@ def load_settings() -> Settings:
     # `postgres://` (sin la `ql`); SQLAlchemy 2.x no la reconoce. Aceptamos los
     # tres esquemas habituales y normalizamos al driver psycopg antes de
     # crear el motor, para que el operador pueda pegar la URL tal cual.
-    if production and not database_url.startswith(
-        ("postgresql://", "postgresql+psycopg://", "postgres://")
-    ):
-        # fallthrough: error se acumula abajo
-        pass
     allowed_hosts = _csv_env("ALLOWED_HOSTS", "*" if not production else "")
     cookie_https_only = _bool_env("COOKIE_HTTPS_ONLY", production)
 

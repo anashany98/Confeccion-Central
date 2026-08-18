@@ -201,6 +201,8 @@
     const h = header.map(normalizeHeader),
       find = (tests) => h.findIndex((x) => tests.some((t) => x.includes(t)));
     const map = {
+      block: find(["bloque", "block", "torre", "edificio"]),
+      floor: find(["planta", "nivel", "piso", "floor"]),
       room: find(["habitacion", "habitaciones", "dormitorio", "estancia", "room", "numero habitacion", "n habitacion"]),
       width: find(["ancho hueco", "anchura hueco", "ancho", "anchura", "width"]),
       height: find(["altura", "alto", "height"]),

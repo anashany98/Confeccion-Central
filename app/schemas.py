@@ -82,6 +82,8 @@ class RoomState(BaseModel):
     model_config = ConfigDict(extra="allow", str_strip_whitespace=True)
 
     id: str = Field(min_length=1, max_length=80)
+    block: str = Field(default="", max_length=120)
+    floor: str = Field(default="", max_length=120)
     room: str = Field(default="", max_length=120)
     width: Decimal | None = None
     height: Decimal | None = None
@@ -98,15 +100,21 @@ class RoomState(BaseModel):
     _parse_hem = field_validator("hem", mode="before")(_decimal)
 
     @property
+    def label(self) -> str:
+        return " · ".join(
+            part for part in (self.block.strip(), self.floor.strip(), self.room.strip()) if part
+        )
+
+    @property
     def has_data(self) -> bool:
-        return bool(self.room or self.width is not None or self.height is not None or self.notes)
+        return bool(self.label or self.width is not None or self.height is not None or self.notes)
 
     @model_validator(mode="after")
     def validate_complete_row(self) -> RoomState:
         if not self.has_data:
             return self
-        if not self.room:
-            raise ValueError("Falta la habitación")
+        if not self.label:
+            raise ValueError("Falta el identificador (habitación, bloque o planta)")
         if self.width is None or self.width <= 0 or self.width > Decimal("100"):
             raise ValueError("El ancho debe estar entre 0 y 100 m")
         if self.height is None or self.height <= 0 or self.height > Decimal("30"):
@@ -161,12 +169,12 @@ class JobState(BaseModel):
         for row in self.rows:
             if not row.has_data:
                 continue
-            key = row.room.strip().casefold()
+            key = row.label.casefold()
             if key in seen:
-                duplicates.add(row.room)
+                duplicates.add(row.label or row.room)
             seen.add(key)
         if duplicates:
-            raise ValueError(f"Habitaciones duplicadas: {', '.join(sorted(duplicates)[:10])}")
+            raise ValueError(f"Identificadores duplicados: {', '.join(sorted(duplicates)[:10])}")
         return self
 
 

@@ -3,6 +3,8 @@ const STATIC = [
   "/",
   "/static/central.css",
   "/static/central.js",
+  "/static/app.js",
+  "/static/sentry.js",
   "/static/logic.js",
   "/static/vendor/xlsx.full.min.js",
   "/static/manifest.webmanifest",
